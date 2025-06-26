@@ -32,8 +32,5 @@ RUN dos2unix /usr/src/app/entrypoint.sh && chmod +x /usr/src/app/entrypoint.sh
 # Expose default Render port (Render binds to $PORT, usually 10000)
 EXPOSE 10000
 
-# Entrypoint
-ENTRYPOINT ["/usr/src/app/entrypoint.sh"]
-
-# Run Gunicorn using PORT from env
-CMD ["sh", "-c", "gunicorn dashboard.wsgi:application --bind 0.0.0.0:${PORT:-10000} --workers 3 --timeout 120"]
+# Start with entrypoint script
+CMD ["/usr/src/app/entrypoint.sh"]
