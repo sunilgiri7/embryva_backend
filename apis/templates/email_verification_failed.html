@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Email Verification Failed</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            background-color: #f8d7da;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            padding: 40px;
+            text-align: center;
+            max-width: 500px;
+        }
+        .card h1 {
+            color: #dc3545;
+        }
+        .card p {
+            margin-top: 10px;
+            font-size: 16px;
+            color: #333;
+        }
+        .btn {
+            margin-top: 20px;
+            background-color: #007bff;
+            color: white;
+            padding: 12px 25px;
+            border-radius: 6px;
+            text-decoration: none;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>❌ Verification Failed</h1>
+        <p>{{ message }}</p>
+        <a href="https://yourfrontenddomain.com/resend-verification" class="btn">Request New Verification Link</a>
+    </div>
+</body>
+</html>
