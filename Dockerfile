@@ -1,32 +1,38 @@
-FROM python:3.12-slim AS base
+# Use official Python image
+FROM python:3.9-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_DEFAULT_TIMEOUT=100 \
-    PORT=8080
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-WORKDIR /app
-
-# Install git (for git-based pip dependencies)
-RUN apt-get update && apt-get install -y \
-    git \
+# Install system dependencies
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       build-essential \
+       libpq-dev \
+       gettext \
+       dos2unix \
+       netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
-# requirements first (leverages Docker cache)
-COPY requirements.txt .
+# Set work directory
+WORKDIR /usr/src/app
+
+# Install dependencies
+COPY requirements.txt /usr/src/app/
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# project code
-COPY . .
+# Copy project files
+COPY . /usr/src/app/
 
-# entrypoint script
-COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
-RUN python manage.py collectstatic --noinput
+# Convert line endings and make entrypoint executable
+RUN dos2unix /usr/src/app/entrypoint.sh && chmod +x /usr/src/app/entrypoint.sh
 
-EXPOSE $PORT
+# Expose default Render port (Render binds to $PORT, usually 10000)
+EXPOSE 10000
 
-ENTRYPOINT ["/entrypoint.sh"]
+# Entrypoint
+ENTRYPOINT ["/usr/src/app/entrypoint.sh"]
 
-# Use environment variable for port
-CMD ["sh", "-c", "gunicorn embryva_backend.wsgi:application --bind 0.0.0.0:$PORT"]
+# Run Gunicorn using PORT from env
+CMD ["sh", "-c", "gunicorn dashboard.wsgi:application --bind 0.0.0.0:${PORT:-10000} --workers 3 --timeout 120"]

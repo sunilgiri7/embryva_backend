@@ -1,11 +1,17 @@
-#!/usr/bin/env sh
-set -e
+#!/bin/bash
 
-# Apply pending migrations (safe to run every start‑up)
-python manage.py makemigrations --no-input
-python manage.py migrate --no-input
+# Wait for database to be ready (optional, useful if using Render DB)
+echo "Waiting for database..."
+while ! nc -z $DB_HOST $DB_PORT; do
+  sleep 1
+done
+echo "Database is up."
 
-# python manage.py collectstatic --noinput
+# Apply migrations
+python manage.py migrate --noinput
 
-# The container’s main process (passed from CMD or docker‑compose command)
+# Collect static files
+python manage.py collectstatic --noinput
+
+# Execute CMD
 exec "$@"
