@@ -10,6 +10,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        build-essential \
        libpq-dev \
+       git \
        gettext \
        dos2unix \
        netcat-openbsd \
