@@ -1,17 +1,19 @@
-#!/bin/bash
+#!/bin/sh
 
-# Wait for database to be ready (optional, useful if using Render DB)
-echo "Waiting for database..."
-while ! nc -z $DB_HOST $DB_PORT; do
-  sleep 1
+# Use fallback values if not set
+DB_HOST=${DB_HOST:-localhost}
+DB_PORT=${DB_PORT:-5432}
+
+echo "Waiting for DB at $DB_HOST:$DB_PORT..."
+
+while ! nc -z "$DB_HOST" "$DB_PORT"; do
+  echo "Waiting for database connection at $DB_HOST:$DB_PORT..."
+  sleep 2
 done
-echo "Database is up."
 
-# Apply migrations
+echo "Database is up - running migrations and starting server..."
+
 python manage.py migrate --noinput
-
-# Collect static files
 python manage.py collectstatic --noinput
 
-# Execute CMD
-exec "$@"
+exec gunicorn embryva_backend.wsgi:application --bind 0.0.0.0:$PORT --workers 3 --timeout 120
