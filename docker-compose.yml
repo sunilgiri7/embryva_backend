@@ -1,19 +1,6 @@
 version: "3.9"
 
 services:
-
-  db:
-    image: postgres:15
-    restart: always
-    environment:
-      POSTGRES_DB: embryva_db
-      POSTGRES_USER: embryva_user
-      POSTGRES_PASSWORD: embryva
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-
   redis:
     image: redis:6
     restart: always
@@ -27,9 +14,7 @@ services:
 
   web:
     build: .
-    
-    command: gunicorn embryva_backend.wsgi:application \
-             --bind 0.0.0.0:8080 --workers 3 --timeout 120
+    command: gunicorn embryva_backend.wsgi:application --bind 0.0.0.0:8080 --workers 3 --timeout 120
     volumes:
       - .:/app
     env_file: .env
@@ -38,8 +23,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      db:
-        condition: service_started
     ports:
       - "8080:8080"
     restart: always
@@ -54,7 +37,6 @@ services:
       DJANGO_SETTINGS_MODULE: embryva_backend.settings
     depends_on:
       - redis
-      - db
     restart: unless-stopped
 
   beat:
@@ -70,8 +52,4 @@ services:
       DJANGO_SETTINGS_MODULE: embryva_backend.settings
     depends_on:
       - redis
-      - db
     restart: unless-stopped
-
-volumes:
-  postgres_data:
