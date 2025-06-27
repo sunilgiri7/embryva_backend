@@ -97,6 +97,8 @@ urlpatterns = [
     path('donors/<uuid:donor_id>/delete/', views.donor_delete, name='donor_delete'),
     
     # Import donors from File
+    path('donors/template/download/', views.download_donor_template, name='download_donor_template'),
+    path('donors/import/preview/', views.preview_donor_import, name='preview_donor_import'),
     path('donors/import/', views.import_donors, name='import_donors'),
     
     # Statistics

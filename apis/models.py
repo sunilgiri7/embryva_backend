@@ -411,11 +411,11 @@ class Donor(models.Model):
     city = models.CharField(max_length=100)
     state = models.CharField(max_length=100)
     country = models.CharField(max_length=100, default='India')
-    postal_code = models.CharField(max_length=20, blank=True, null=True)
+    postal_code = models.CharField(max_length=50, blank=True, null=True)  # Increased from 20 to 50
     
     # Donor Specific Information
-    donor_type = models.CharField(max_length=20, choices=DONOR_TYPES)
-    availability_status = models.CharField(max_length=20, choices=AVAILABILITY_STATUS, default='pending')
+    donor_type = models.CharField(max_length=50, choices=DONOR_TYPES)  # Increased from 20 to 50
+    availability_status = models.CharField(max_length=50, choices=AVAILABILITY_STATUS, default='pending')  # Increased from 20 to 50
     blood_group = models.CharField(max_length=5, choices=BLOOD_GROUPS)
     
     # Physical Characteristics
@@ -426,9 +426,9 @@ class Donor(models.Model):
     skin_tone = models.CharField(max_length=50, blank=True, null=True)
     
     # Personal Information
-    education_level = models.CharField(max_length=20, choices=EDUCATION_LEVELS, blank=True, null=True)
+    education_level = models.CharField(max_length=50, choices=EDUCATION_LEVELS, blank=True, null=True)  # Increased from 20 to 50
     occupation = models.CharField(max_length=100, blank=True, null=True)
-    marital_status = models.CharField(max_length=20, choices=MARITAL_STATUS, blank=True, null=True)
+    marital_status = models.CharField(max_length=50, choices=MARITAL_STATUS, blank=True, null=True)  # Increased from 20 to 50
     religion = models.CharField(max_length=50, blank=True, null=True)
     ethnicity = models.CharField(max_length=50, blank=True, null=True)
     

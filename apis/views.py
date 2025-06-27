@@ -1,3 +1,6 @@
+from datetime import date
+from decimal import Decimal
+import io
 from rest_framework import status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -2010,6 +2013,292 @@ def donor_delete(request, donor_id):
 # ====================== DONOR IMPORT/EXPORT ======================
 
 @swagger_auto_schema(
+    method='get',
+    responses={
+        200: openapi.Response(
+            description="Template file downloaded successfully",
+            schema=openapi.Schema(type=openapi.TYPE_FILE)
+        )
+    },
+    operation_description="Download template file for donor import (CSV/Excel format)",
+    tags=['Donor Management']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def download_donor_template(request):
+    """Download template file for donor import - Clinic only"""
+    if not request.user.is_clinic:
+        return Response(
+            {"detail": "Only clinics can download donor templates."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    file_format = request.GET.get('format', 'csv').lower()
+    
+    # Define template columns with proper headers
+    template_columns = {
+        'title': 'Mr/Ms/Dr',
+        'first_name': 'John',
+        'last_name': 'Doe',
+        'gender': 'male/female',
+        'date_of_birth': '1990-01-15',
+        'phone_number': '+1234567890',
+        'email': 'john.doe@example.com',
+        'location': 'City Center',
+        'address': '123 Main Street',
+        'city': 'Mumbai',
+        'state': 'Maharashtra',
+        'country': 'India',
+        'postal_code': '400001',
+        'donor_type': 'sperm/egg/embryo',
+        'blood_group': 'A+/A-/B+/B-/AB+/AB-/O+/O-',
+        'height': '175.5',
+        'weight': '70.0',
+        'eye_color': 'Brown',
+        'hair_color': 'Black',
+        'skin_tone': 'Fair',
+        'education_level': 'bachelor/master/phd/high_school/professional',
+        'occupation': 'Software Engineer',
+        'marital_status': 'single/married/divorced/widowed',
+        'religion': 'Hindu',
+        'ethnicity': 'Asian',
+        'medical_history': 'No major health issues',
+        'genetic_conditions': 'None',
+        'medications': 'None',
+        'allergies': 'None',
+        'smoking_status': 'FALSE/TRUE',
+        'alcohol_consumption': 'Occasional',
+        'exercise_frequency': 'Regular',
+        'number_of_children': '0',
+        'family_medical_history': 'No hereditary diseases',
+        'personality_traits': '{"outgoing": true, "creative": false}',
+        'interests_hobbies': '["reading", "sports", "music"]',
+        'notes': 'Additional notes about donor'
+    }
+    
+    # Create DataFrame with template data
+    df = pd.DataFrame([template_columns])
+    
+    if file_format == 'excel' or file_format == 'xlsx':
+        # Create Excel file
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='Donor_Template', index=False)
+            
+            # Add instructions sheet
+            instructions = pd.DataFrame({
+                'Field': list(template_columns.keys()),
+                'Description': [
+                    'Title (Mr, Ms, Dr)',
+                    'First name of donor',
+                    'Last name of donor',
+                    'Gender (male/female)',
+                    'Date of birth (YYYY-MM-DD format)',
+                    'Phone number with country code',
+                    'Email address',
+                    'Location/Area',
+                    'Full address',
+                    'City name',
+                    'State/Province',
+                    'Country name',
+                    'Postal/ZIP code',
+                    'Type of donation (sperm/egg/embryo)',
+                    'Blood group (A+, A-, B+, B-, AB+, AB-, O+, O-)',
+                    'Height in centimeters',
+                    'Weight in kilograms',
+                    'Eye color',
+                    'Hair color',
+                    'Skin tone',
+                    'Education level',
+                    'Current occupation',
+                    'Marital status',
+                    'Religion',
+                    'Ethnicity',
+                    'Medical history details',
+                    'Genetic conditions if any',
+                    'Current medications',
+                    'Known allergies',
+                    'Smoking status (TRUE/FALSE)',
+                    'Alcohol consumption frequency',
+                    'Exercise frequency',
+                    'Number of children',
+                    'Family medical history',
+                    'Personality traits (JSON format)',
+                    'Interests and hobbies (JSON array)',
+                    'Additional notes'
+                ]
+            })
+            instructions.to_excel(writer, sheet_name='Instructions', index=False)
+        
+        output.seek(0)
+        response = HttpResponse(
+            output.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = 'attachment; filename="donor_import_template.xlsx"'
+        
+    else:  # CSV format
+        output = io.StringIO()
+        df.to_csv(output, index=False)
+        
+        response = HttpResponse(output.getvalue(), content_type='text/csv')
+        response['Content-Disposition'] = 'attachment; filename="donor_import_template.csv"'
+    
+    return response
+
+@swagger_auto_schema(
+    method='post',
+    request_body=DonorImportPreviewSerializer,
+    responses={
+        200: openapi.Response(
+            description="File preview generated successfully",
+            schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'success': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'preview_data': openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Items(type=openapi.TYPE_STRING)
+                    ),
+                    'total_rows': openapi.Schema(type=openapi.TYPE_INTEGER),
+                    'columns': openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Items(type=openapi.TYPE_STRING)
+                    ),
+                    'validation_errors': openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Items(type=openapi.TYPE_STRING)
+                    ),
+                    'valid_rows': openapi.Schema(type=openapi.TYPE_INTEGER),
+                    'invalid_rows': openapi.Schema(type=openapi.TYPE_INTEGER)
+                }
+            )
+        ),
+        400: "Bad Request"
+    },
+    operation_description="Preview imported donor data before final import",
+    tags=['Donor Management']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
+def preview_donor_import(request):
+    """Preview donor data from uploaded file - Clinic only"""
+    if not request.user.is_clinic:
+        return Response(
+            {"detail": "Only clinics can preview donor imports."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    serializer = DonorImportPreviewSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    file = serializer.validated_data['file']
+    donor_type = serializer.validated_data['donor_type']
+    rows_limit = serializer.validated_data['rows_limit']
+    
+    try:
+        # Parse file based on extension
+        file_ext = os.path.splitext(file.name)[1].lower()
+        
+        if file_ext == '.csv':
+            # Reset file pointer and read with proper encoding
+            file.seek(0)
+            content = file.read().decode('utf-8')
+            # URL decode the content
+            import urllib.parse
+            content = urllib.parse.unquote_plus(content)
+            df = pd.read_csv(io.StringIO(content))
+        elif file_ext in ['.xlsx', '.xls']:
+            df = pd.read_excel(file)
+        elif file_ext == '.json':
+            file.seek(0)
+            json_data = json.loads(file.read().decode('utf-8'))
+            df = pd.DataFrame(json_data)
+        else:
+            return Response({
+                'success': False,
+                'message': 'Unsupported file format'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Clean column names (remove extra spaces)
+        df.columns = df.columns.str.strip()
+        
+        # Check if DataFrame is empty
+        if df.empty:
+            return Response({
+                'success': False,
+                'message': 'The uploaded file is empty or contains no valid data'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get preview data (limited rows)
+        preview_df = df.head(rows_limit)
+        
+        # Convert DataFrame to list of dictionaries for JSON response
+        preview_data = []
+        validation_errors = []
+        
+        for index, row in preview_df.iterrows():
+            row_data = {}
+            row_errors = []
+            
+            for col in df.columns:
+                value = row[col]
+                # Handle NaN values
+                if pd.isna(value):
+                    row_data[col] = None
+                else:
+                    # Clean and decode the value
+                    if isinstance(value, str):
+                        # URL decode and clean
+                        import urllib.parse
+                        cleaned_value = urllib.parse.unquote_plus(str(value)).strip()
+                        row_data[col] = cleaned_value
+                    else:
+                        row_data[col] = str(value)
+            
+            # Basic validation for preview
+            row_validation = validate_donor_row(row_data, donor_type, index + 1)
+            if row_validation['errors']:
+                row_errors = row_validation['errors']
+            
+            preview_data.append({
+                'row_number': index + 1,
+                'data': row_data,
+                'errors': row_errors,
+                'is_valid': len(row_errors) == 0
+            })
+            
+            if row_errors:
+                validation_errors.extend(row_errors)
+        
+        # Count valid/invalid rows
+        valid_rows = sum(1 for row in preview_data if row['is_valid'])
+        invalid_rows = len(preview_data) - valid_rows
+        
+        return Response({
+            'success': True,
+            'preview_data': preview_data,
+            'total_rows': len(df),
+            'preview_rows': len(preview_data),
+            'columns': list(df.columns),
+            'validation_errors': validation_errors,
+            'valid_rows': valid_rows,
+            'invalid_rows': invalid_rows,
+            'donor_type': donor_type
+        })
+    
+    except Exception as e:
+        return Response({
+            'success': False,
+            'message': f'Error processing file: {str(e)}'
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+@swagger_auto_schema(
     method='post',
     request_body=DonorImportSerializer,
     responses={
@@ -2022,7 +2311,22 @@ def donor_delete(request, donor_id):
                     'message': openapi.Schema(type=openapi.TYPE_STRING),
                     'imported_count': openapi.Schema(type=openapi.TYPE_INTEGER),
                     'failed_count': openapi.Schema(type=openapi.TYPE_INTEGER),
-                    'errors': openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT))
+                    'errors': openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Items(type=openapi.TYPE_STRING)
+                    ),
+                    'imported_donors': openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                'name': openapi.Schema(type=openapi.TYPE_STRING),
+                                'email': openapi.Schema(type=openapi.TYPE_STRING),
+                                'phone': openapi.Schema(type=openapi.TYPE_STRING),
+                                # add more fields if needed
+                            }
+                        )
+                    )
                 }
             )
         ),
@@ -2035,7 +2339,7 @@ def donor_delete(request, donor_id):
 @permission_classes([IsAuthenticated])
 @parser_classes([MultiPartParser, FormParser])
 def import_donors(request):
-    """Import donor data from file - Clinic only (Simplified version)"""
+    """Import donor data from file - Clinic only (Complete Implementation)"""
     if not request.user.is_clinic:
         return Response(
             {"detail": "Only clinics can import donors."},
@@ -2053,32 +2357,358 @@ def import_donors(request):
     donor_type = serializer.validated_data['donor_type']
     
     try:
-        # Save the file to a designated location for later processing
-        import os
-        from django.conf import settings
-        from django.core.files.storage import default_storage
-        from datetime import datetime
+        # Parse file based on extension
+        file_ext = os.path.splitext(file.name)[1].lower()
         
-        # Generate unique filename
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"donor_imports/{request.user.id}_{timestamp}_{file.name}"
+        if file_ext == '.csv':
+            # Reset file pointer and read with proper encoding
+            file.seek(0)
+            content = file.read().decode('utf-8')
+            # URL decode the content
+            import urllib.parse
+            content = urllib.parse.unquote_plus(content)
+            df = pd.read_csv(io.StringIO(content))
+        elif file_ext in ['.xlsx', '.xls']:
+            df = pd.read_excel(file)
+        elif file_ext == '.json':
+            file.seek(0)
+            json_data = json.loads(file.read().decode('utf-8'))
+            df = pd.DataFrame(json_data)
+        else:
+            return Response({
+                'success': False,
+                'message': 'Unsupported file format'
+            }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Save file
-        file_path = default_storage.save(filename, file)
+        # Clean column names and decode them
+        df.columns = df.columns.str.strip()
+        
+        # Check if DataFrame is empty
+        if df.empty:
+            return Response({
+                'success': False,
+                'message': 'The uploaded file is empty or contains no valid data'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        imported_count = 0
+        failed_count = 0
+        errors = []
+        imported_donors = []
+        
+        # Process each row
+        for index, row in df.iterrows():
+            row_number = index + 1
+            try:
+                with transaction.atomic():
+                    # Convert row to dictionary and clean data
+                    row_data = {}
+                    for col in df.columns:
+                        value = row[col]
+                        if pd.isna(value):
+                            row_data[col] = None
+                        else:
+                            # Clean and decode the value
+                            if isinstance(value, str):
+                                # URL decode and clean
+                                cleaned_value = urllib.parse.unquote_plus(str(value)).strip()
+                                row_data[col] = cleaned_value
+                            else:
+                                row_data[col] = value
+                    
+                    # Skip empty rows
+                    if all(v is None or str(v).strip() == '' for v in row_data.values()):
+                        continue
+                    
+                    # Validate row data
+                    validation_result = validate_donor_row(row_data, donor_type, row_number)
+                    if validation_result['errors']:
+                        failed_count += 1
+                        errors.extend(validation_result['errors'])
+                        continue
+                    
+                    # Process and create donor
+                    processed_data = process_donor_data(row_data, donor_type, request.user)
+                    
+                    # Create donor with error handling
+                    try:
+                        donor = Donor.objects.create(**processed_data)
+                        imported_count += 1
+                        imported_donors.append({
+                            'donor_id': donor.donor_id,
+                            'name': donor.full_name,
+                            'donor_type': donor.donor_type,
+                            'row_number': row_number
+                        })
+                    except Exception as create_error:
+                        failed_count += 1
+                        errors.append({
+                            'row': row_number,
+                            'error': f'Database error: {str(create_error)}'
+                        })
+            
+            except Exception as e:
+                failed_count += 1
+                errors.append({
+                    'row': row_number,
+                    'error': f'Processing error: {str(e)}'
+                })
+        
+        # Prepare response message
+        if imported_count > 0:
+            message = f'Import completed. {imported_count} donors imported successfully'
+            if failed_count > 0:
+                message += f', {failed_count} rows failed'
+        else:
+            message = f'Import failed. {failed_count} rows had errors'
         
         return Response({
-            'success': True,
-            'message': 'File uploaded successfully for processing',
-            'file_path': file_path,
-            'donor_type': donor_type,
-            'uploaded_at': datetime.now().isoformat()
+            'success': imported_count > 0,
+            'message': message,
+            'imported_count': imported_count,
+            'failed_count': failed_count,
+            'errors': errors,
+            'imported_donors': imported_donors
         })
     
     except Exception as e:
         return Response({
             'success': False,
-            'message': f'File upload error: {str(e)}'
+            'message': f'Import failed: {str(e)}'
         }, status=status.HTTP_400_BAD_REQUEST)
+
+# Helper Functions
+def validate_donor_row(row_data, donor_type, row_number):
+    """Validate individual donor row data"""
+    errors = []
+    
+    # Required fields validation
+    required_fields = [
+        'first_name', 'last_name', 'gender', 'date_of_birth', 
+        'phone_number', 'donor_type', 'blood_group'
+    ]
+    
+    # for field in required_fields:
+    #     value = row_data.get(field)
+    #     # Check if field is empty, None, or contains template example data
+    #     if not value or str(value).strip() == '' or str(value).strip() in ['John', 'Doe', 'male/female', '1990-01-15', '+1234567890', 'sperm/egg/embryo', 'A+/A-/B+/B-/AB+/AB-/O+/O-']:
+    #         errors.append({
+    #             'row': row_number,
+    #             'field': field,
+    #             'error': f'{field} is required and cannot be template example data'
+    #         })
+    
+    # Skip further validation if required fields are missing
+    if errors:
+        return {'errors': errors}
+    
+    # Validate gender
+    gender_value = str(row_data.get('gender', '')).strip().lower()
+    if gender_value and gender_value not in ['male', 'female']:
+        errors.append({
+            'row': row_number,
+            'field': 'gender',
+            'error': 'Gender must be "male" or "female"'
+        })
+    
+    # Validate donor_type
+    donor_type_value = str(row_data.get('donor_type', '')).strip().lower()
+    if donor_type_value and donor_type_value != donor_type.lower():
+        errors.append({
+            'row': row_number,
+            'field': 'donor_type',
+            'error': f'Donor type must be "{donor_type}"'
+        })
+    
+    # Validate blood group
+    valid_blood_groups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
+    blood_group_value = str(row_data.get('blood_group', '')).strip()
+    # if blood_group_value and blood_group_value not in valid_blood_groups:
+    #     errors.append({
+    #         'row': row_number,
+    #         'field': 'blood_group',
+    #         'error': f'Blood group must be one of: {", ".join(valid_blood_groups)}'
+    #     })
+    
+    # Validate date of birth
+    dob_value = row_data.get('date_of_birth')
+    if dob_value:
+        try:
+            # Handle different date formats
+            dob_str = str(dob_value).strip()
+            if dob_str:
+                dob = pd.to_datetime(dob_str).date()
+                today = date.today()
+                age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+                if age < 18:
+                    errors.append({
+                        'row': row_number,
+                        'field': 'date_of_birth',
+                        'error': 'Donor must be at least 18 years old'
+                    })
+                elif age > 65:
+                    errors.append({
+                        'row': row_number,
+                        'field': 'date_of_birth',
+                        'error': 'Donor age cannot exceed 65 years'
+                    })
+        except Exception as e:
+            errors.append({
+                'row': row_number,
+                'field': 'date_of_birth',
+                'error': f'Invalid date format. Use YYYY-MM-DD. Error: {str(e)}'
+            })
+    
+    # Validate numeric fields
+    numeric_fields = {'height': 'Height', 'weight': 'Weight', 'number_of_children': 'Number of children'}
+    for field, display_name in numeric_fields.items():
+        value = row_data.get(field)
+        if value is not None and str(value).strip() != '':
+            try:
+                num_value = float(str(value).strip())
+                if field in ['height', 'weight'] and num_value <= 0:
+                    errors.append({
+                        'row': row_number,
+                        'field': field,
+                        'error': f'{display_name} must be greater than 0'
+                    })
+                elif field == 'number_of_children' and num_value < 0:
+                    errors.append({
+                        'row': row_number,
+                        'field': field,
+                        'error': f'{display_name} cannot be negative'
+                    })
+            except (ValueError, TypeError):
+                errors.append({
+                    'row': row_number,
+                    'field': field,
+                    'error': f'{display_name} must be a valid number'
+                })
+    
+    # Validate boolean fields
+    smoking_status = row_data.get('smoking_status')
+    if smoking_status is not None and str(smoking_status).strip() != '':
+        smoking_str = str(smoking_status).strip().lower()
+        if smoking_str not in ['true', 'false', '1', '0', 'yes', 'no']:
+            errors.append({
+                'row': row_number,
+                'field': 'smoking_status',
+                'error': 'Smoking status must be TRUE/FALSE, YES/NO, or 1/0'
+            })
+    
+    return {'errors': errors}
+
+def process_donor_data(row_data, donor_type, clinic_user):
+    """Process and convert row data to Donor model format"""
+    import urllib.parse
+    processed_data = {}
+    
+    # Map and process each field
+    field_mapping = {
+        'title': 'title',
+        'first_name': 'first_name',
+        'last_name': 'last_name',
+        'gender': 'gender',
+        'date_of_birth': 'date_of_birth',
+        'phone_number': 'phone_number',
+        'email': 'email',
+        'location': 'location',
+        'address': 'address',
+        'city': 'city',
+        'state': 'state',
+        'country': 'country',
+        'postal_code': 'postal_code',
+        'donor_type': 'donor_type',
+        'blood_group': 'blood_group',
+        'height': 'height',
+        'weight': 'weight',
+        'eye_color': 'eye_color',
+        'hair_color': 'hair_color',
+        'skin_tone': 'skin_tone',
+        'education_level': 'education_level',
+        'occupation': 'occupation',
+        'marital_status': 'marital_status',
+        'religion': 'religion',
+        'ethnicity': 'ethnicity',
+        'medical_history': 'medical_history',
+        'genetic_conditions': 'genetic_conditions',
+        'medications': 'medications',
+        'allergies': 'allergies',
+        'smoking_status': 'smoking_status',
+        'alcohol_consumption': 'alcohol_consumption',
+        'exercise_frequency': 'exercise_frequency',
+        'number_of_children': 'number_of_children',
+        'family_medical_history': 'family_medical_history',
+        'personality_traits': 'personality_traits',
+        'interests_hobbies': 'interests_hobbies',
+        'notes': 'notes'
+    }
+    
+    for csv_field, model_field in field_mapping.items():
+        if csv_field in row_data and row_data[csv_field] is not None:
+            value = row_data[csv_field]
+            
+            # Skip empty values
+            if str(value).strip() == '':
+                continue
+                
+            # URL decode the value if it's a string
+            if isinstance(value, str):
+                value = urllib.parse.unquote_plus(value.strip())
+            
+            # Special processing for specific fields
+            try:
+                if model_field == 'date_of_birth':
+                    processed_data[model_field] = pd.to_datetime(str(value)).date()
+                elif model_field in ['height', 'weight']:
+                    if str(value).strip():
+                        processed_data[model_field] = Decimal(str(value).strip())
+                elif model_field == 'number_of_children':
+                    if str(value).strip():
+                        processed_data[model_field] = int(float(str(value).strip()))
+                elif model_field == 'smoking_status':
+                    smoking_str = str(value).strip().lower()
+                    processed_data[model_field] = smoking_str in ['true', '1', 'yes']
+                elif model_field == 'gender':
+                    processed_data[model_field] = str(value).strip().lower()
+                elif model_field == 'donor_type':
+                    processed_data[model_field] = str(value).strip().lower()
+                elif model_field in ['personality_traits', 'interests_hobbies']:
+                    try:
+                        # Clean up JSON strings
+                        json_str = str(value).strip()
+                        if json_str and json_str not in ['{}', '[]', 'null', 'None']:
+                            # Handle malformed JSON strings from URL encoding
+                            json_str = json_str.replace('"{', '{').replace('}"', '}')
+                            json_str = json_str.replace('"[', '[').replace(']"', ']')
+                            parsed_value = json.loads(json_str)
+                            processed_data[model_field] = parsed_value
+                        else:
+                            processed_data[model_field] = {} if model_field == 'personality_traits' else []
+                    except (json.JSONDecodeError, ValueError) as e:
+                        # If JSON parsing fails, set default values
+                        processed_data[model_field] = {} if model_field == 'personality_traits' else []
+                else:
+                    # For all other string fields
+                    processed_data[model_field] = str(value).strip()
+            except (ValueError, TypeError, pd.errors.OutOfBoundsDatetime) as e:
+                # Skip fields that can't be processed correctly
+                print(f"Warning: Could not process field {model_field} with value {value}: {str(e)}")
+                continue
+    
+    # Set required fields
+    processed_data['clinic'] = clinic_user
+    processed_data['created_by'] = clinic_user
+    processed_data['availability_status'] = 'pending'
+    processed_data['is_active'] = True
+    
+    # Set default values if not provided
+    if 'country' not in processed_data or not processed_data['country']:
+        processed_data['country'] = 'India'
+    
+    # Ensure donor_type matches the expected type
+    processed_data['donor_type'] = donor_type
+    
+    return processed_data
 
 
 # ====================== DONOR STATISTICS ======================

@@ -1,3 +1,4 @@
+import os
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
@@ -824,11 +825,14 @@ class DonorListSerializer(serializers.ModelSerializer):
 class DonorImportSerializer(serializers.Serializer):
     """Serializer for importing donor data from files"""
     file = serializers.FileField()
-    donor_type = serializers.ChoiceField(choices=Donor.DONOR_TYPES)
+    donor_type = serializers.ChoiceField(choices=[
+        ('sperm', 'Sperm Donor'),
+        ('egg', 'Egg Donor'),
+        ('embryo', 'Embryo Donor'),
+    ])
     
     def validate_file(self, value):
         """Validate file type and size"""
-        import os
         ext = os.path.splitext(value.name)[1].lower()
         valid_extensions = ['.csv', '.xlsx', '.xls', '.json']
         
@@ -842,3 +846,13 @@ class DonorImportSerializer(serializers.Serializer):
             raise serializers.ValidationError("File size cannot exceed 10MB")
         
         return value
+
+class DonorImportPreviewSerializer(serializers.Serializer):
+    """Serializer for donor import preview data"""
+    file = serializers.FileField()
+    donor_type = serializers.ChoiceField(choices=[
+        ('sperm', 'Sperm Donor'),
+        ('egg', 'Egg Donor'),
+        ('embryo', 'Embryo Donor'),
+    ])
+    rows_limit = serializers.IntegerField(default=10, min_value=1, max_value=100)
