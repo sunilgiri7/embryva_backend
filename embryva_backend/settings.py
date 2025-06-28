@@ -196,6 +196,10 @@ SIMPLE_JWT = {
     'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=7),
 }
 
+# Pinecone Configuration
+PINECONE_API_KEY = os.getenv('PINECONE_API_KEY', 'pcsk_62ucZK_FnxEpEu4Ld6cm9FRM4Hb5WBPAoHshbjggHGKotaDRwVnRbDEY5ty4XjpU8u4CpM')
+PINECONE_ENVIRONMENT = os.getenv('PINECONE_ENVIRONMENT', 'us-east-1')
+
 # Logging Configuration for Celery
 LOGGING = {
     'version': 1,

@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 import io
+import logging
 from rest_framework import status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -12,7 +13,8 @@ from django.contrib.auth import login
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from apis.email_service import EmailService
-from .models import Appointment, Meeting, User
+from apis.services.embeddingsMatching import DonorMatchingEngine, EmbeddingService, MatchResult
+from .models import Appointment, MatchingResult, Meeting, User
 from django.db.models import Q, Count
 from .serializers import *
 from django.shortcuts import get_object_or_404, render
@@ -29,6 +31,8 @@ from django.db import transaction
 from django.http import HttpResponse
 from django.db import models
 from rest_framework.decorators import api_view, permission_classes, parser_classes
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 10
@@ -2937,3 +2941,456 @@ def delete_donor_document(request, donor_id, document_id):
         'success': True,
         'message': 'Document deleted successfully'
     }, status=status.HTTP_204_NO_CONTENT)
+
+###############################AI MATCHING ENDPOINTS####################################
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_fertility_profile(request):
+    """Create fertility profile for parent"""
+    if not request.user.is_parent:
+        return Response(
+            {"detail": "Only parents can create fertility profiles."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    serializer = FertilityProfileSerializer(data=request.data, context={'request': request})
+    if serializer.is_valid():
+        profile = serializer.save()
+        return Response({
+            'success': True,
+            'message': 'Fertility profile created successfully',
+            'profile_id': str(profile.id)
+        }, status=status.HTTP_201_CREATED)
+    
+    return Response({
+        'success': False,
+        'message': 'Please check the form data',
+        'errors': serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['PATCH', 'PUT'])
+@permission_classes([IsAuthenticated])
+def update_fertility_profile(request, donor_type_preference):
+    """Update fertility profile for parent by donor type"""
+    if not request.user.is_parent:
+        return Response(
+            {"detail": "Only parents can update fertility profiles."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    try:
+        profile = FertilityProfile.objects.get(parent=request.user, donor_type_preference=donor_type_preference)
+    except FertilityProfile.DoesNotExist:
+        return Response(
+            {"detail": "Fertility profile not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    serializer = FertilityProfileSerializer(profile, data=request.data, partial=True, context={'request': request})
+    if serializer.is_valid():
+        serializer.save()
+        return Response({
+            'success': True,
+            'message': 'Fertility profile updated successfully',
+            'profile_id': str(profile.id)
+        }, status=status.HTTP_200_OK)
+
+    return Response({
+        'success': False,
+        'message': 'Validation error',
+        'errors': serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def generate_donor_embeddings(request):
+    """Generate embeddings for all donors (Admin/Clinic only)"""
+    if not (request.user.is_admin or request.user.is_clinic):
+        return Response(
+            {"detail": "Unauthorized."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    try:
+        embedding_service = EmbeddingService()
+        if request.user.is_clinic:
+            donors = Donor.objects.filter(clinic=request.user)
+            print("donors", donors)
+        else:
+            donors = Donor.objects.all()
+        
+        success_count = 0
+        error_count = 0
+        errors = []
+        
+        for donor in donors:
+            try:
+                # Create donor data dictionary
+                donor_data = {
+                    'gender': donor.gender,
+                    'donor_type': donor.donor_type,
+                    'height': donor.height,
+                    'eye_color': donor.eye_color,
+                    'hair_color': donor.hair_color,
+                    'ethnicity': donor.ethnicity,
+                    'skin_tone': donor.skin_tone,
+                    'education_level': donor.education_level,
+                    'occupation': donor.occupation,
+                    'blood_group': donor.blood_group,
+                    'smoking_status': donor.smoking_status,
+                    'alcohol_consumption': donor.alcohol_consumption,
+                    'religion': donor.religion,
+                    'marital_status': donor.marital_status,
+                    'personality_traits': donor.personality_traits,
+                    'interests_hobbies': donor.interests_hobbies,
+                    'date_of_birth': donor.date_of_birth,
+                    'genetic_conditions': donor.genetic_conditions,
+                    'medical_history': donor.medical_history,
+                }
+                
+                # Generate text representation
+                donor_text = embedding_service.create_donor_text(donor_data)
+                
+                # Generate embedding
+                embedding = embedding_service.generate_embedding(donor_text)
+                
+                # Store in Pinecone
+                metadata = {
+                    'donor_type': donor.donor_type,
+                    'gender': donor.gender,
+                    'education_level': donor.education_level,
+                    'ethnicity': donor.ethnicity,
+                    'location': donor.location,
+                }
+                
+                embedding_service.store_donor_embedding(
+                    donor_id=donor.donor_id,
+                    clinic_id=str(donor.clinic.id),
+                    embedding=embedding,
+                    metadata=metadata
+                )
+                
+                success_count += 1
+                
+            except Exception as e:
+                error_count += 1
+                errors.append({
+                    'donor_id': donor.donor_id,
+                    'error': str(e)
+                })
+                logger.error(f"Failed to process donor {donor.donor_id}: {e}")
+        
+        return Response({
+            'success': True,
+            'message': f'Embedding generation completed. {success_count} successful, {error_count} failed.',
+            'success_count': success_count,
+            'error_count': error_count,
+            'errors': errors[:10]  # Limit error details
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to generate donor embeddings: {e}")
+        return Response({
+            'success': False,
+            'message': f'Failed to generate embeddings: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def find_matching_donors(request):
+    """Find matching donors for parent's fertility profile"""
+    if not request.user.is_parent:
+        return Response(
+            {"detail": "Only parents can search for matching donors."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    # Get or validate profile_id
+    profile_id = request.data.get('profile_id')
+    if not profile_id:
+        return Response({
+            'success': False,
+            'message': 'Profile ID is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        # Get fertility profile
+        fertility_profile = FertilityProfile.objects.get(
+            id=profile_id,
+            parent=request.user
+        )
+    except FertilityProfile.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Fertility profile not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    try:
+        # Initialize services
+        embedding_service = EmbeddingService()
+        matching_engine = DonorMatchingEngine()
+        
+        # Create profile data dictionary
+        profile_data = {
+            'donor_type_preference': fertility_profile.donor_type_preference,
+            'location': fertility_profile.location,
+            'preferred_height_min': fertility_profile.preferred_height_min,
+            'preferred_height_max': fertility_profile.preferred_height_max,
+            'preferred_ethnicity': fertility_profile.preferred_ethnicity,
+            'preferred_eye_color': fertility_profile.preferred_eye_color,
+            'preferred_hair_color': fertility_profile.preferred_hair_color,
+            'preferred_education_level': fertility_profile.preferred_education_level,
+            'genetic_screening_required': fertility_profile.genetic_screening_required,
+            'preferred_age_min': fertility_profile.preferred_age_min,
+            'preferred_age_max': fertility_profile.preferred_age_max,
+            'preferred_occupation': fertility_profile.preferred_occupation,
+            'preferred_religion': fertility_profile.preferred_religion,
+            'importance_physical': fertility_profile.importance_physical,
+            'importance_education': fertility_profile.importance_education,
+            'importance_medical': fertility_profile.importance_medical,
+            'importance_personality': fertility_profile.importance_personality,
+            'special_requirements': fertility_profile.special_requirements,
+        }
+        
+        # Generate profile text and embedding
+        profile_text = embedding_service.create_profile_text(profile_data)
+        profile_embedding = embedding_service.generate_embedding(profile_text)
+        
+        # Search for similar donors
+        similar_donors = embedding_service.search_similar_donors(
+            profile_embedding=profile_embedding,
+            top_k=50,  # Get more candidates for detailed filtering
+            donor_type_filter=fertility_profile.donor_type_preference
+        )
+        
+        # Get detailed donor information and calculate precise matches
+        match_results = []
+        
+        for similar_donor in similar_donors:
+            try:
+                # Get full donor information
+                donor = Donor.objects.get(
+                    donor_id=similar_donor['donor_id'],
+                    clinic_id=similar_donor['clinic_id']
+                )
+                
+                # Create detailed donor data
+                donor_data = {
+                    'gender': donor.gender,
+                    'donor_type': donor.donor_type,
+                    'height': donor.height,
+                    'eye_color': donor.eye_color,
+                    'hair_color': donor.hair_color,
+                    'ethnicity': donor.ethnicity,
+                    'skin_tone': donor.skin_tone,
+                    'education_level': donor.education_level,
+                    'occupation': donor.occupation,
+                    'blood_group': donor.blood_group,
+                    'smoking_status': donor.smoking_status,
+                    'alcohol_consumption': donor.alcohol_consumption,
+                    'religion': donor.religion,
+                    'marital_status': donor.marital_status,
+                    'personality_traits': donor.personality_traits,
+                    'interests_hobbies': donor.interests_hobbies,
+                    'date_of_birth': donor.date_of_birth,
+                    'genetic_conditions': donor.genetic_conditions,
+                    'medical_history': donor.medical_history,
+                    'location': donor.location,
+                }
+                
+                # Calculate detailed match score
+                detailed_score, matched_attributes = matching_engine.calculate_detailed_match_score(
+                    donor_data, profile_data
+                )
+                
+                # Combine semantic similarity with detailed matching
+                # Weighted combination: 70% detailed matching + 30% semantic similarity
+                final_score = (detailed_score * 0.7) + (similar_donor['similarity_score'] * 0.3)
+                
+                # Generate AI explanation
+                ai_explanation = matching_engine.generate_ai_explanation(
+                    donor_data, profile_data, matched_attributes, final_score
+                )
+                
+                # Create match result
+                match_result = MatchResult(
+                    donor_id=donor.donor_id,
+                    clinic_id=str(donor.clinic.id),
+                    match_score=final_score,
+                    matched_attributes=matched_attributes,
+                    ai_explanation=ai_explanation
+                )
+                
+                match_results.append(match_result)
+                
+                # Store result for analytics (optional)
+                MatchingResult.objects.update_or_create(
+                    fertility_profile=fertility_profile,
+                    donor_id=donor.donor_id,
+                    defaults={
+                        'clinic_id': donor.clinic.id,
+                        'match_score': final_score,
+                        'matched_attributes': matched_attributes,
+                        'ai_explanation': ai_explanation
+                    }
+                )
+                
+            except Donor.DoesNotExist:
+                logger.warning(f"Donor {similar_donor['donor_id']} not found in database")
+                continue
+            except Exception as e:
+                logger.error(f"Error processing donor {similar_donor['donor_id']}: {e}")
+                continue
+        
+        # Sort by match score and limit results
+        match_results.sort(key=lambda x: x.match_score, reverse=True)
+        top_matches = match_results[:20]  # Return top 20 matches
+        
+        # Format response (privacy-safe)
+        formatted_matches = []
+        for match in top_matches:
+            formatted_matches.append({
+                'donor_reference_id': match.donor_id,  # Safe reference ID
+                'clinic_reference_id': match.clinic_id,  # Safe clinic reference
+                'match_percentage': round(match.match_score * 100, 1),
+                'matched_attributes': match.matched_attributes,
+                'ai_explanation': match.ai_explanation,
+                'compatibility_score': {
+                    'overall': round(match.match_score * 100, 1),
+                    'physical': round(len([k for k in match.matched_attributes.keys() 
+                                        if k in ['height', 'ethnicity', 'eye_color', 'hair_color']]) / 4 * 100, 1),
+                    'educational': 100 if 'education' in match.matched_attributes else 0,
+                    'medical': round(len([k for k in match.matched_attributes.keys() 
+                                       if k in ['genetic_screening', 'smoking']]) / 2 * 100, 1),
+                }
+            })
+        
+        return Response({
+            'success': True,
+            'message': f'Found {len(formatted_matches)} matching donors',
+            'total_matches': len(formatted_matches),
+            'matches': formatted_matches,
+            'search_criteria': {
+                'donor_type': fertility_profile.donor_type_preference,
+                'location': fertility_profile.location,
+                'key_preferences': [
+                    k for k, v in profile_data.items() 
+                    if v and k.startswith('preferred_') and k != 'preferred_occupation'
+                ]
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to find matching donors: {e}")
+        return Response({
+            'success': False,
+            'message': f'Failed to find matching donors: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_fertility_profiles(request):
+    """Get fertility profiles for the authenticated parent"""
+    if not request.user.is_parent:
+        return Response(
+            {"detail": "Only parents can view fertility profiles."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    profiles = FertilityProfile.objects.filter(parent=request.user).order_by('-created_at')
+    
+    profile_data = []
+    for profile in profiles:
+        profile_data.append({
+            'id': str(profile.id),
+            'donor_type_preference': profile.donor_type_preference,
+            'location': profile.location,
+            'created_at': profile.created_at.isoformat(),
+            'has_matches': MatchingResult.objects.filter(fertility_profile=profile).exists()
+        })
+    
+    return Response({
+        'success': True,
+        'profiles': profile_data
+    })
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def trigger_donor_embedding_on_create(request):
+    """Trigger embedding generation when donor is created/updated"""
+    if not request.user.is_clinic:
+        return Response(
+            {"detail": "Only clinics can trigger donor embeddings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    donor_id = request.data.get('donor_id')
+    if not donor_id:
+        return Response({
+            'success': False,
+            'message': 'Donor ID is required'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        donor = Donor.objects.get(donor_id=donor_id, clinic=request.user)
+        
+        # Initialize embedding service
+        embedding_service = EmbeddingService()
+        
+        # Create donor data
+        donor_data = {
+            'gender': donor.gender,
+            'donor_type': donor.donor_type,
+            'height': donor.height,
+            'eye_color': donor.eye_color,
+            'hair_color': donor.hair_color,
+            'ethnicity': donor.ethnicity,
+            'skin_tone': donor.skin_tone,
+            'education_level': donor.education_level,
+            'occupation': donor.occupation,
+            'blood_group': donor.blood_group,
+            'smoking_status': donor.smoking_status,
+            'alcohol_consumption': donor.alcohol_consumption,
+            'religion': donor.religion,
+            'marital_status': donor.marital_status,
+            'personality_traits': donor.personality_traits,
+            'interests_hobbies': donor.interests_hobbies,
+            'date_of_birth': donor.date_of_birth,
+            'genetic_conditions': donor.genetic_conditions,
+            'medical_history': donor.medical_history,
+        }
+        
+        # Generate and store embedding
+        donor_text = embedding_service.create_donor_text(donor_data)
+        embedding = embedding_service.generate_embedding(donor_text)
+        
+        metadata = {
+            'donor_type': donor.donor_type,
+            'gender': donor.gender,
+            'education_level': donor.education_level,
+            'ethnicity': donor.ethnicity,
+            'location': donor.location,
+        }
+        
+        embedding_service.store_donor_embedding(
+            donor_id=donor.donor_id,
+            clinic_id=str(donor.clinic.id),
+            embedding=embedding,
+            metadata=metadata
+        )
+        
+        return Response({
+            'success': True,
+            'message': f'Embedding generated successfully for donor {donor_id}'
+        })
+        
+    except Donor.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Donor not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Failed to generate embedding for donor {donor_id}: {e}")
+        return Response({
+            'success': False,
+            'message': f'Failed to generate embedding: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -111,4 +111,16 @@ urlpatterns = [
     # Document management
     path('donors/<uuid:donor_id>/documents/add/', views.add_donor_document, name='add_donor_document'),
     path('donors/<uuid:donor_id>/documents/<uuid:document_id>/delete/', views.delete_donor_document, name='delete_donor_document'),
+
+    # Fertility Profile URLs
+    path('fertility-profile/create/', views.create_fertility_profile, name='create_fertility_profile'),
+    path('fertility-profile/<str:donor_type_preference>/update/', views.update_fertility_profile, name='update_fertility_profile'),
+    path('fertility-profile/list/', views.get_fertility_profiles, name='get_fertility_profiles'),
+    
+    # Matching URLs
+    path('donors/find-matches/', views.find_matching_donors, name='find_matching_donors'),
+    
+    # Admin/Clinic URLs
+    path('donors/generate-embeddings/', views.generate_donor_embeddings, name='generate_donor_embeddings'),
+    path('donors/trigger-embedding/', views.trigger_donor_embedding_on_create, name='trigger_donor_embedding'),
 ]

@@ -5,7 +5,7 @@ from django.contrib.auth.password_validation import validate_password
 from rest_framework.authentication import _
 
 from apis.utils import send_verification_email
-from .models import Appointment, Donor, DonorDocument, DonorImage, Meeting, PasswordResetOTP, SubscriptionPlan, User, UserSubscription
+from .models import Appointment, Donor, DonorDocument, DonorImage, FertilityProfile, Meeting, PasswordResetOTP, SubscriptionPlan, User, UserSubscription
 from django.conf import settings
 from django.core.mail import send_mail
 from django.contrib.auth import get_user_model
@@ -856,3 +856,28 @@ class DonorImportPreviewSerializer(serializers.Serializer):
         ('embryo', 'Embryo Donor'),
     ])
     rows_limit = serializers.IntegerField(default=10, min_value=1, max_value=100)
+
+#############################AI MATCHING SERIALIZERS####################################
+class FertilityProfileSerializer(serializers.ModelSerializer):
+    """Serializer for creating fertility profiles"""
+    
+    class Meta:
+        model = FertilityProfile
+        exclude = ['parent', 'id']
+    
+    def validate(self, data):
+        """Custom validation for profile data"""
+        if data.get('preferred_height_min') and data.get('preferred_height_max'):
+            if data['preferred_height_min'] > data['preferred_height_max']:
+                raise serializers.ValidationError("Minimum height cannot be greater than maximum height")
+        
+        if data.get('preferred_age_min') and data.get('preferred_age_max'):
+            if data['preferred_age_min'] > data['preferred_age_max']:
+                raise serializers.ValidationError("Minimum age cannot be greater than maximum age")
+        
+        return data
+    
+    def create(self, validated_data):
+        request = self.context.get('request')
+        validated_data['parent'] = request.user
+        return super().create(validated_data)

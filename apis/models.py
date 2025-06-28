@@ -643,3 +643,92 @@ class Appointment(models.Model):
     
     def __str__(self):
         return f"{self.name} - {self.clinic.get_full_name()} - {self.get_reason_for_consultation_display()}"
+
+class FertilityProfile(models.Model):
+    """Parent's fertility matching profile"""
+    DONOR_TYPE_CHOICES = [
+        ('sperm', 'Sperm Donor'),
+        ('egg', 'Egg Donor'),
+        ('both', 'Both'),
+    ]
+    
+    EDUCATION_CHOICES = [
+        ('high_school', 'High School'),
+        ('bachelors', 'Bachelor\'s Degree'),
+        ('masters', 'Master\'s Degree'),
+        ('doctorate', 'Doctorate'),
+        ('professional', 'Professional Degree'),
+    ]
+    
+    ETHNICITY_CHOICES = [
+        ('caucasian', 'Caucasian'),
+        ('african', 'African'),
+        ('asian', 'Asian'),
+        ('hispanic', 'Hispanic'),
+        ('middle_eastern', 'Middle Eastern'),
+        ('mixed', 'Mixed'),
+        ('other', 'Other'),
+    ]
+    
+    EYE_COLOR_CHOICES = [
+        ('brown', 'Brown'),
+        ('blue', 'Blue'),
+        ('green', 'Green'),
+        ('hazel', 'Hazel'),
+        ('gray', 'Gray'),
+    ]
+    
+    # Basic Info
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    parent = models.ForeignKey('User', on_delete=models.CASCADE, related_name='fertility_profiles')
+    donor_type_preference = models.CharField(max_length=20, choices=DONOR_TYPE_CHOICES)
+    location = models.CharField(max_length=255)
+    
+    # Physical Attributes Preferences
+    preferred_height_min = models.IntegerField(help_text="Height in cm", null=True, blank=True)
+    preferred_height_max = models.IntegerField(help_text="Height in cm", null=True, blank=True)
+    preferred_ethnicity = models.CharField(max_length=50, choices=ETHNICITY_CHOICES, blank=True)
+    preferred_eye_color = models.CharField(max_length=20, choices=EYE_COLOR_CHOICES, blank=True)
+    preferred_hair_color = models.CharField(max_length=50, blank=True)
+    
+    # Education & Background
+    preferred_education_level = models.CharField(max_length=50, choices=EDUCATION_CHOICES, blank=True)
+    genetic_screening_required = models.BooleanField(default=True)
+    
+    # Demographic Preferences
+    preferred_age_min = models.IntegerField(null=True, blank=True)
+    preferred_age_max = models.IntegerField(null=True, blank=True)
+    preferred_occupation = models.CharField(max_length=255, blank=True)
+    preferred_religion = models.CharField(max_length=100, blank=True)
+    
+    # Additional Preferences
+    importance_physical = models.IntegerField(default=5, help_text="1-10 scale")
+    importance_education = models.IntegerField(default=5, help_text="1-10 scale")
+    importance_medical = models.IntegerField(default=5, help_text="1-10 scale")
+    importance_personality = models.IntegerField(default=5, help_text="1-10 scale")
+    
+    # Special Requirements
+    special_requirements = models.TextField(blank=True)
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'fertility_profiles'
+        unique_together = ['parent', 'donor_type_preference']
+
+class MatchingResult(models.Model):
+    """Store matching results for analytics and caching"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    fertility_profile = models.ForeignKey(FertilityProfile, on_delete=models.CASCADE)
+    donor_id = models.CharField(max_length=255)  # Reference to Donor.donor_id
+    clinic_id = models.UUIDField()  # Reference to clinic User.id
+    match_score = models.FloatField()
+    matched_attributes = models.JSONField()
+    ai_explanation = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        db_table = 'matching_results'
+        unique_together = ['fertility_profile', 'donor_id']
