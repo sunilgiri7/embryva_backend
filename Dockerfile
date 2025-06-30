@@ -1,36 +1,44 @@
-# Use official Python image
-FROM python:3.11-slim
+FROM python:3.12-slim
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DEFAULT_TIMEOUT=100 \
+    PORT=8080
 
-# Install system dependencies
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       build-essential \
-       libpq-dev \
-       git \
-       gettext \
-       dos2unix \
-       netcat-openbsd \
-    && rm -rf /var/lib/apt/lists/*
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
-# Set work directory
-WORKDIR /usr/src/app
+WORKDIR /app
 
-# Install dependencies
-COPY requirements.txt /usr/src/app/
-RUN pip install --upgrade pip && pip install -r requirements.txt
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Copy project files
-COPY . /usr/src/app/
+# Copy application code
+COPY . .
 
-# Convert line endings and make entrypoint executable
-RUN dos2unix /usr/src/app/entrypoint.sh && chmod +x /usr/src/app/entrypoint.sh
+# Create entrypoint script inline to avoid extra file
+RUN echo '#!/usr/bin/env sh\n\
+set -e\n\
+python manage.py makemigrations --no-input\n\
+python manage.py migrate --no-input\n\
+exec "$@"' > /entrypoint.sh && \
+    chmod +x /entrypoint.sh
 
-# Expose default Render port (Render binds to $PORT, usually 10000)
+# Collect static files
+RUN python manage.py collectstatic --noinput
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash app && \
+    chown -R app:app /app
+USER app
+
+# EXPOSE $PORT
 EXPOSE 10000
 
-# Start with entrypoint script
-CMD ["/usr/src/app/entrypoint.sh"]
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["sh", "-c", "gunicorn embryva_backend.wsgi:application --bind 0.0.0.0:$PORT"]
