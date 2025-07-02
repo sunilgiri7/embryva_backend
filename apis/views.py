@@ -2946,21 +2946,44 @@ def delete_donor_document(request, donor_id, document_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_fertility_profile(request):
-    """Create fertility profile for parent"""
+    """Create or update fertility profile for parent"""
     if not request.user.is_parent:
         return Response(
             {"detail": "Only parents can create fertility profiles."},
             status=status.HTTP_403_FORBIDDEN,
         )
     
-    serializer = FertilityProfileSerializer(data=request.data, context={'request': request})
+    donor_type = request.data.get('donor_type_preference')
+    
+    # Check if profile already exists for this parent and donor type
+    try:
+        existing_profile = FertilityProfile.objects.get(
+            parent=request.user,
+            donor_type_preference=donor_type
+        )
+        # Update existing profile
+        serializer = FertilityProfileSerializer(
+            existing_profile, 
+            data=request.data, 
+            context={'request': request}
+        )
+        action = 'updated'
+    except FertilityProfile.DoesNotExist:
+        # Create new profile
+        serializer = FertilityProfileSerializer(
+            data=request.data, 
+            context={'request': request}
+        )
+        action = 'created'
+    
     if serializer.is_valid():
         profile = serializer.save()
         return Response({
             'success': True,
-            'message': 'Fertility profile created successfully',
-            'profile_id': str(profile.id)
-        }, status=status.HTTP_201_CREATED)
+            'message': f'Fertility profile {action} successfully',
+            'profile_id': str(profile.id),
+            'action': action
+        }, status=status.HTTP_201_CREATED if action == 'created' else status.HTTP_200_OK)
     
     return Response({
         'success': False,
@@ -3097,39 +3120,23 @@ def generate_donor_embeddings(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def find_matching_donors(request):
-    """Find matching donors for parent's fertility profile"""
+    """Find matching donors for a parent's fertility profile with enhanced logic."""
     if not request.user.is_parent:
-        return Response(
-            {"detail": "Only parents can search for matching donors."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
+        return Response({"detail": "Only parents can search for matching donors."}, status=status.HTTP_403_FORBIDDEN)
     
-    # Get or validate profile_id
     profile_id = request.data.get('profile_id')
     if not profile_id:
-        return Response({
-            'success': False,
-            'message': 'Profile ID is required'
-        }, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'success': False, 'message': 'Profile ID is required'}, status=status.HTTP_400_BAD_REQUEST)
     
     try:
-        # Get fertility profile
-        fertility_profile = FertilityProfile.objects.get(
-            id=profile_id,
-            parent=request.user
-        )
+        fertility_profile = FertilityProfile.objects.get(id=profile_id, parent=request.user)
     except FertilityProfile.DoesNotExist:
-        return Response({
-            'success': False,
-            'message': 'Fertility profile not found'
-        }, status=status.HTTP_404_NOT_FOUND)
+        return Response({'success': False, 'message': 'Fertility profile not found'}, status=status.HTTP_404_NOT_FOUND)
     
     try:
-        # Initialize services
         embedding_service = EmbeddingService()
         matching_engine = DonorMatchingEngine()
         
-        # Create profile data dictionary
         profile_data = {
             'donor_type_preference': fertility_profile.donor_type_preference,
             'location': fertility_profile.location,
@@ -3151,140 +3158,98 @@ def find_matching_donors(request):
             'special_requirements': fertility_profile.special_requirements,
         }
         
-        # Generate profile text and embedding
+        # 1. Generate Profile Embedding
         profile_text = embedding_service.create_profile_text(profile_data)
         profile_embedding = embedding_service.generate_embedding(profile_text)
         
-        # Search for similar donors
+        # 2. Semantic Search for Candidates
         similar_donors = embedding_service.search_similar_donors(
             profile_embedding=profile_embedding,
-            top_k=50,  # Get more candidates for detailed filtering
+            top_k=100,  # Get a larger pool of candidates
             donor_type_filter=fertility_profile.donor_type_preference
         )
         
-        # Get detailed donor information and calculate precise matches
+        # 3. Detailed Filtering and Scoring
         match_results = []
-        
         for similar_donor in similar_donors:
             try:
-                # Get full donor information
-                donor = Donor.objects.get(
-                    donor_id=similar_donor['donor_id'],
-                    clinic_id=similar_donor['clinic_id']
-                )
+                # FIX: Convert string UUID from Pinecone back to UUID object for Django query
+                clinic_uuid = uuid.UUID(similar_donor['clinic_id'])
+                donor = Donor.objects.get(donor_id=similar_donor['donor_id'], clinic_id=clinic_uuid)
                 
-                # Create detailed donor data
                 donor_data = {
-                    'gender': donor.gender,
-                    'donor_type': donor.donor_type,
-                    'height': donor.height,
-                    'eye_color': donor.eye_color,
-                    'hair_color': donor.hair_color,
-                    'ethnicity': donor.ethnicity,
-                    'skin_tone': donor.skin_tone,
-                    'education_level': donor.education_level,
-                    'occupation': donor.occupation,
-                    'blood_group': donor.blood_group,
-                    'smoking_status': donor.smoking_status,
-                    'alcohol_consumption': donor.alcohol_consumption,
-                    'religion': donor.religion,
-                    'marital_status': donor.marital_status,
-                    'personality_traits': donor.personality_traits,
-                    'interests_hobbies': donor.interests_hobbies,
-                    'date_of_birth': donor.date_of_birth,
-                    'genetic_conditions': donor.genetic_conditions,
-                    'medical_history': donor.medical_history,
+                    'gender': donor.gender, 'donor_type': donor.donor_type, 'height': donor.height,
+                    'eye_color': donor.eye_color, 'hair_color': donor.hair_color, 'ethnicity': donor.ethnicity,
+                    'skin_tone': donor.skin_tone, 'education_level': donor.education_level, 'occupation': donor.occupation,
+                    'blood_group': donor.blood_group, 'smoking_status': donor.smoking_status,
+                    'alcohol_consumption': donor.alcohol_consumption, 'religion': donor.religion,
+                    'marital_status': donor.marital_status, 'personality_traits': donor.personality_traits,
+                    'interests_hobbies': donor.interests_hobbies, 'date_of_birth': donor.date_of_birth,
+                    'genetic_conditions': donor.genetic_conditions, 'medical_history': donor.medical_history,
                     'location': donor.location,
                 }
                 
-                # Calculate detailed match score
-                detailed_score, matched_attributes = matching_engine.calculate_detailed_match_score(
+                # Calculate detailed score and compatibility breakdown
+                detailed_score, matched_attrs, compat_scores = matching_engine.calculate_detailed_match_score(
                     donor_data, profile_data
                 )
                 
-                # Combine semantic similarity with detailed matching
-                # Weighted combination: 70% detailed matching + 30% semantic similarity
-                final_score = (detailed_score * 0.7) + (similar_donor['similarity_score'] * 0.3)
+                # Combine scores: 60% rule-based + 40% semantic similarity
+                final_score = (detailed_score * 0.6) + (similar_donor['similarity_score'] * 0.4)
                 
-                # Generate AI explanation
                 ai_explanation = matching_engine.generate_ai_explanation(
-                    donor_data, profile_data, matched_attributes, final_score
+                    donor_data, profile_data, matched_attrs, final_score
                 )
                 
-                # Create match result
-                match_result = MatchResult(
-                    donor_id=donor.donor_id,
-                    clinic_id=str(donor.clinic.id),
-                    match_score=final_score,
-                    matched_attributes=matched_attributes,
-                    ai_explanation=ai_explanation
-                )
-                
-                match_results.append(match_result)
-                
-                # Store result for analytics (optional)
-                MatchingResult.objects.update_or_create(
-                    fertility_profile=fertility_profile,
-                    donor_id=donor.donor_id,
-                    defaults={
-                        'clinic_id': donor.clinic.id,
-                        'match_score': final_score,
-                        'matched_attributes': matched_attributes,
-                        'ai_explanation': ai_explanation
-                    }
-                )
+                match_results.append(MatchResult(
+                    donor_id=donor.donor_id, clinic_id=str(donor.clinic.id), match_score=final_score,
+                    matched_attributes=matched_attrs, ai_explanation=ai_explanation,
+                    compatibility_scores=compat_scores
+                ))
                 
             except Donor.DoesNotExist:
-                logger.warning(f"Donor {similar_donor['donor_id']} not found in database")
+                logger.warning(f"Donor {similar_donor['donor_id']} from clinic {similar_donor['clinic_id']} not found in database.")
                 continue
+            except (ValueError, TypeError):
+                 logger.warning(f"Invalid UUID format for clinic_id: {similar_donor['clinic_id']}")
+                 continue
             except Exception as e:
-                logger.error(f"Error processing donor {similar_donor['donor_id']}: {e}")
+                logger.error(f"Error processing donor {similar_donor.get('donor_id', 'N/A')}: {e}")
                 continue
         
-        # Sort by match score and limit results
+        # 4. Sort and Filter Results
         match_results.sort(key=lambda x: x.match_score, reverse=True)
-        top_matches = match_results[:20]  # Return top 20 matches
         
-        # Format response (privacy-safe)
-        formatted_matches = []
-        for match in top_matches:
-            formatted_matches.append({
-                'donor_reference_id': match.donor_id,  # Safe reference ID
-                'clinic_reference_id': match.clinic_id,  # Safe clinic reference
-                'match_percentage': round(match.match_score * 100, 1),
-                'matched_attributes': match.matched_attributes,
-                'ai_explanation': match.ai_explanation,
-                'compatibility_score': {
-                    'overall': round(match.match_score * 100, 1),
-                    'physical': round(len([k for k in match.matched_attributes.keys() 
-                                        if k in ['height', 'ethnicity', 'eye_color', 'hair_color']]) / 4 * 100, 1),
-                    'educational': 100 if 'education' in match.matched_attributes else 0,
-                    'medical': round(len([k for k in match.matched_attributes.keys() 
-                                       if k in ['genetic_screening', 'smoking']]) / 2 * 100, 1),
-                }
-            })
+        # FIX: Filter for matches >= 75% and limit the final result set to prevent overload
+        high_quality_matches = [m for m in match_results if m.match_score >= 0.75]
+        top_matches = high_quality_matches[:50]  # Return up to 50 top matches
+        
+        # 5. Format Response
+        formatted_matches = [{
+            'donor_reference_id': match.donor_id,
+            'clinic_reference_id': match.clinic_id,
+            'match_percentage': round(match.match_score * 100, 1),
+            'ai_explanation': match.ai_explanation,
+            'matched_attributes_summary': list(match.matched_attributes.keys()),
+            'compatibility_score': {
+                'overall': round(match.match_score * 100, 1),
+                'physical': round(match.compatibility_scores.get('physical', 0), 1),
+                'educational': round(match.compatibility_scores.get('educational', 0), 1),
+                'demographic': round(match.compatibility_scores.get('demographic', 0), 1),
+                'medical': round(match.compatibility_scores.get('medical', 0), 1),
+            }
+        } for match in top_matches]
         
         return Response({
             'success': True,
-            'message': f'Found {len(formatted_matches)} matching donors',
+            'message': f'Found {len(formatted_matches)} high-quality matching donors.',
             'total_matches': len(formatted_matches),
             'matches': formatted_matches,
-            'search_criteria': {
-                'donor_type': fertility_profile.donor_type_preference,
-                'location': fertility_profile.location,
-                'key_preferences': [
-                    k for k, v in profile_data.items() 
-                    if v and k.startswith('preferred_') and k != 'preferred_occupation'
-                ]
-            }
         })
         
     except Exception as e:
-        logger.error(f"Failed to find matching donors: {e}")
-        return Response({
-            'success': False,
-            'message': f'Failed to find matching donors: {str(e)}'
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        logger.error(f"Critical error in find_matching_donors: {e}", exc_info=True)
+        return Response({'success': False, 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])

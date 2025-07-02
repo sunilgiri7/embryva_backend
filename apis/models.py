@@ -380,7 +380,7 @@ class Donor(models.Model):
     EDUCATION_LEVELS = (
         ('high_school', 'High School'),
         ('bachelor', 'Bachelor\'s Degree'),
-        ('master', 'Master\'s Degree'),
+        ('masters', 'Master\'s Degree'),
         ('phd', 'PhD'),
         ('professional', 'Professional Degree'),
     )
