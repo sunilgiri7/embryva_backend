@@ -25,8 +25,6 @@ from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
 import pandas as pd
 import json
-import csv
-from io import StringIO
 from django.db import transaction
 from django.http import HttpResponse
 from django.db import models
@@ -2803,14 +2801,11 @@ def donor_statistics(request):
 
 @swagger_auto_schema(
     method='post',
-    request_body=openapi.Schema(
-        type=openapi.TYPE_OBJECT,
-        properties={
-            'image': openapi.Schema(type=openapi.TYPE_FILE),
-            'caption': openapi.Schema(type=openapi.TYPE_STRING),
-            'is_primary': openapi.Schema(type=openapi.TYPE_BOOLEAN)
-        }
-    ),
+    manual_parameters=[
+        openapi.Parameter('image', openapi.IN_FORM, type=openapi.TYPE_FILE, required=True),
+        openapi.Parameter('caption', openapi.IN_FORM, type=openapi.TYPE_STRING),
+        openapi.Parameter('is_primary', openapi.IN_FORM, type=openapi.TYPE_BOOLEAN),
+    ],
     responses={201: DonorImageSerializer()},
     operation_description="Add image to donor",
     tags=['Donor Management']
@@ -2876,15 +2871,12 @@ def delete_donor_image(request, donor_id, image_id):
 
 @swagger_auto_schema(
     method='post',
-    request_body=openapi.Schema(
-        type=openapi.TYPE_OBJECT,
-        properties={
-            'document_type': openapi.Schema(type=openapi.TYPE_STRING),
-            'document': openapi.Schema(type=openapi.TYPE_FILE),
-            'document_name': openapi.Schema(type=openapi.TYPE_STRING),
-            'description': openapi.Schema(type=openapi.TYPE_STRING)
-        }
-    ),
+    manual_parameters=[
+        openapi.Parameter('document_type', openapi.IN_FORM, type=openapi.TYPE_STRING, required=True),
+        openapi.Parameter('document', openapi.IN_FORM, type=openapi.TYPE_FILE, required=True),
+        openapi.Parameter('document_name', openapi.IN_FORM, type=openapi.TYPE_STRING),
+        openapi.Parameter('description', openapi.IN_FORM, type=openapi.TYPE_STRING),
+    ],
     responses={201: DonorDocumentSerializer()},
     operation_description="Add document to donor",
     tags=['Donor Management']
