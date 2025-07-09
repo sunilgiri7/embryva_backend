@@ -56,6 +56,7 @@ class User(AbstractUser):
     specialization = models.CharField(max_length=255, blank=True, null=True)
     years_of_experience = models.PositiveIntegerField(blank=True, null=True)
     id_proof = models.FileField(upload_to='clinic_documents/', blank=True, null=True)
+    profile_image = models.ImageField(upload_to='profile_images/', blank=True, null=True)
 
     @property
     def is_admin(self):
@@ -84,6 +85,14 @@ class User(AbstractUser):
         self.email_verification_token = uuid.uuid4()
         self.email_verification_sent_at = timezone.now()
         self.save(update_fields=['email_verification_token', 'email_verification_sent_at'])
+
+    def save(self, *args, **kwargs):
+        if not self.profile_image and not self.pk:
+            self.profile_image = 'media/profile_images/default_avatar.png'
+            # pass
+        if not self.username:
+            self.username = self.email
+        super().save(*args, **kwargs)
     
     def __str__(self):
         return f"{self.get_full_name()} ({self.user_type})"

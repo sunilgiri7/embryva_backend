@@ -18,13 +18,11 @@ from .serializers import *
 from django.shortcuts import get_object_or_404, render
 from django.db.models import Q
 from rest_framework.pagination import PageNumberPagination
-from rest_framework import viewsets, status, permissions
+from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
 import pandas as pd
 import json
-import csv
-from io import StringIO
 from django.db import transaction
 from django.http import HttpResponse
 from django.db import models
@@ -356,10 +354,133 @@ class UserListView(generics.ListAPIView):
 @permission_classes([IsAuthenticated])
 def user_profile(request):
     """
-    Get current user profile
+    Get current user profile for all user types (admin, parent, clinic, subadmin)
     """
-    serializer = UserSerializer(request.user)
-    return Response(serializer.data)
+    serializer = UserSerializer(request.user, context={'request': request})
+    return Response({
+        'success': True,
+        'user': serializer.data
+    })
+
+@swagger_auto_schema(
+    method='put',
+    request_body=AdminProfileUpdateSerializer,
+    responses={
+        200: openapi.Response(
+            description="Profile updated successfully",
+            schema=UserSerializer
+        ),
+        400: "Bad Request - Validation errors",
+        403: "Forbidden - Only admins can update profiles"
+    },
+    operation_description="Update admin profile (admin only)",
+    tags=['Profile']
+)
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def admin_profile_update(request):
+    """
+    Update admin profile - only accessible by admin users
+    """
+    if not request.user.is_admin:
+        return Response(
+            {"detail": "Only admins can update profiles."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    serializer = AdminProfileUpdateSerializer(
+        request.user, 
+        data=request.data, 
+        partial=True,
+        context={'request': request}
+    )
+    
+    if serializer.is_valid():
+        user = serializer.save()
+        response_serializer = UserSerializer(user, context={'request': request})
+        return Response({
+            'success': True,
+            'message': 'Profile updated successfully',
+            'user': response_serializer.data
+        }, status=status.HTTP_200_OK)
+    
+    return Response({
+        'success': False,
+        'errors': serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+# New profile_image_upload view for handling image upload separately
+@swagger_auto_schema(
+    method='post',
+    manual_parameters=[
+        openapi.Parameter(
+            'profile_image',
+            openapi.IN_FORM,
+            description="Profile image file",
+            type=openapi.TYPE_FILE,
+            required=True
+        )
+    ],
+    responses={
+        200: openapi.Response(
+            description="Profile image uploaded successfully",
+            schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'success': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'message': openapi.Schema(type=openapi.TYPE_STRING),
+                    'profile_image_url': openapi.Schema(type=openapi.TYPE_STRING)
+                }
+            )
+        ),
+        400: "Bad Request - Invalid image file",
+        403: "Forbidden - Only admins can upload images"
+    },
+    operation_description="Upload profile image (admin only)",
+    tags=['Profile']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def profile_image_upload(request):
+    """
+    Upload profile image - only accessible by admin users
+    """
+    if not request.user.is_admin:
+        return Response(
+            {"detail": "Only admins can upload profile images."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    if 'profile_image' not in request.FILES:
+        return Response({
+            'success': False,
+            'message': 'No image file provided'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    profile_image = request.FILES['profile_image']
+    
+    # Validate image file
+    if not profile_image.content_type.startswith('image/'):
+        return Response({
+            'success': False,
+            'message': 'Invalid image file'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Delete old image if exists
+    if request.user.profile_image:
+        request.user.profile_image.delete()
+    
+    # Save new image
+    request.user.profile_image = profile_image
+    request.user.save()
+    
+    profile_image_url = request.build_absolute_uri(request.user.profile_image.url)
+    
+    return Response({
+        'success': True,
+        'message': 'Profile image uploaded successfully',
+        'profile_image_url': profile_image_url
+    }, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -536,9 +657,9 @@ def clinic_list(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def parent_list(request):
-    if not request.user.is_admin:
+    if not (request.user.is_admin or request.user.is_subadmin):
         return Response(
-            {"detail": "Only admins can view parent list."},
+            {"detail": "Only admins or sub-admins can view clinic list."},
             status=status.HTTP_403_FORBIDDEN,
         )
     
@@ -747,7 +868,7 @@ def clinic_delete(request, user_id):
 @permission_classes([IsAuthenticated])
 def parent_detail(request, user_id):
     # ▸ NEW: permission check for parent’s own record
-    if not (request.user.is_admin or (request.user.is_parent and str(request.user.id) == str(user_id))):
+    if not (request.user.is_admin or request.user.is_subadmin or (request.user.is_parent and str(request.user.id) == str(user_id))):
         return Response(
             {"detail": "You do not have permission to view these details."},
             status=status.HTTP_403_FORBIDDEN,
@@ -779,7 +900,7 @@ def parent_detail(request, user_id):
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
 def parent_update(request, user_id):
-    if not (request.user.is_admin or (request.user.is_parent and str(request.user.id) == str(user_id))):
+    if not (request.user.is_admin or request.user.is_subadmin or (request.user.is_parent and str(request.user.id) == str(user_id))):
         return Response(
             {"detail": "You do not have permission to update these details."},
             status=status.HTTP_403_FORBIDDEN,
@@ -812,9 +933,9 @@ def parent_update(request, user_id):
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def parent_delete(request, user_id):
-    if not request.user.is_admin:
+    if not (request.user.is_admin or request.user.is_subadmin):
         return Response(
-            {"detail": "Only admins can delete parent."},
+            {"detail": "Only admins or sub-admins can view clinic list."},
             status=status.HTTP_403_FORBIDDEN,
         )
     
@@ -1001,9 +1122,9 @@ def appointment_delete(request, appointment_id):
     """
     Admin only: Delete appointment
     """
-    if not request.user.is_admin:
+    if not (request.user.is_admin or request.user.is_subadmin):
         return Response(
-            {"detail": "Only admins can delete appointments."},
+            {"detail": "Only admins or sub-admins can view clinic list."},
             status=status.HTTP_403_FORBIDDEN,
         )
     
@@ -1317,17 +1438,22 @@ def send_meeting_reminders(request, meeting_id):
                 'scheduled_meetings': openapi.Schema(type=openapi.TYPE_INTEGER),
                 'ongoing_meetings': openapi.Schema(type=openapi.TYPE_INTEGER),
                 'completed_meetings': openapi.Schema(type=openapi.TYPE_INTEGER),
+                'total_users': openapi.Schema(type=openapi.TYPE_INTEGER),
+                'total_active_users': openapi.Schema(type=openapi.TYPE_INTEGER),
+                'total_clinics': openapi.Schema(type=openapi.TYPE_INTEGER),
+                'subscriber_users': openapi.Schema(type=openapi.TYPE_INTEGER),
+                'total_subadmins': openapi.Schema(type=openapi.TYPE_INTEGER),
             }
         )
     )},
-    operation_description="Get appointment and meeting statistics for dashboard",
+    operation_description="Get appointment, meeting, and user statistics for dashboard",
     tags=['Dashboard']
 )
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_stats(request):
     """
-    Admin/SubAdmin: Get dashboard statistics for appointment management
+    Admin/SubAdmin: Get dashboard statistics for appointment management and user stats
     """
     if not (request.user.is_admin or request.user.is_subadmin):
         return Response(
@@ -1353,6 +1479,21 @@ def dashboard_stats(request):
         cancelled=Count('id', filter=Q(status='cancelled')),
     )
     
+    # User statistics
+    user_stats = User.objects.aggregate(
+        total_users=Count('id'),
+        total_active_users=Count('id', filter=Q(is_active=True)),
+        total_clinics=Count('id', filter=Q(user_type='clinic')),
+        total_subadmins=Count('id', filter=Q(user_type='subadmin')),
+    )
+    
+    # Subscriber users (users with active subscriptions)
+    subscriber_users = UserSubscription.objects.filter(
+        status='active',
+        start_date__lte=timezone.now(),
+        end_date__gte=timezone.now()
+    ).values('user').distinct().count()
+    
     # Recent appointments
     recent_appointments = Appointment.objects.select_related('clinic').order_by('-created_at')[:5]
     recent_appointments_data = AppointmentDetailSerializer(recent_appointments, many=True).data
@@ -1369,6 +1510,13 @@ def dashboard_stats(request):
         'statistics': {
             'appointments': appointment_stats,
             'meetings': meeting_stats,
+            'users': {
+                'total_users': user_stats['total_users'],
+                'total_active_users': user_stats['total_active_users'],
+                'total_clinics': user_stats['total_clinics'],
+                'subscriber_users': subscriber_users,
+                'total_subadmins': user_stats['total_subadmins'],
+            }
         },
         'recent_appointments': recent_appointments_data,
         'upcoming_meetings': upcoming_meetings_data

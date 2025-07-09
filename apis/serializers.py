@@ -167,14 +167,15 @@ class UserSerializer(serializers.ModelSerializer):
     is_subadmin  = serializers.SerializerMethodField()
     is_clinic    = serializers.SerializerMethodField()
     is_parent    = serializers.SerializerMethodField()
+    profile_image_url = serializers.SerializerMethodField()
 
     class Meta:
         model  = User
         fields = [
             "id", "first_name", "last_name", "email", "phone_number",
-            "user_type", "is_verified", "created_at",
+            "user_type", "is_verified", "created_at", "profile_image",
             "relationship_to_child", "specialization", "years_of_experience",
-            "is_admin", "is_subadmin", "is_clinic", "is_parent",
+            "is_admin", "is_subadmin", "is_clinic", "is_parent", "profile_image_url",
         ]
         read_only_fields = ["id", "user_type", "created_at"]
 
@@ -183,6 +184,46 @@ class UserSerializer(serializers.ModelSerializer):
     def get_is_subadmin(self, obj): return obj.is_subadmin
     def get_is_clinic(self, obj):   return obj.is_clinic
     def get_is_parent(self, obj):   return obj.is_parent
+    
+    def get_profile_image_url(self, obj):
+        if obj.profile_image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.profile_image.url)
+            return obj.profile_image.url
+        return None
+    
+class AdminProfileUpdateSerializer(serializers.ModelSerializer):
+    profile_image = serializers.ImageField(required=False)
+    
+    class Meta:
+        model = User
+        fields = [
+            'first_name', 'last_name', 'email', 'phone_number',
+            'profile_image'
+        ]
+    
+    def validate_email(self, value):
+        user = self.instance
+        if User.objects.filter(email=value).exclude(pk=user.pk).exists():
+            raise serializers.ValidationError("User with this email already exists")
+        return value
+    
+    def update(self, instance, validated_data):
+        # Handle profile image update
+        profile_image = validated_data.pop('profile_image', None)
+        if profile_image:
+            # Delete old image if exists
+            if instance.profile_image:
+                instance.profile_image.delete()
+            instance.profile_image = profile_image
+        
+        # Update other fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        
+        instance.save()
+        return instance
 
 # ---------------------------- SEND OTP -------------------------------
 class ForgotPasswordEmailSerializer(serializers.Serializer):
