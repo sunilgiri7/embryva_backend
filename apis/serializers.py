@@ -73,7 +73,8 @@ class LoginSerializer(serializers.Serializer):
         if not user.is_active:
             raise serializers.ValidationError('User account is disabled')
 
-        if not user.is_verified:
+        # Only check email verification for clinic and parent users
+        if user.user_type in ['clinic', 'parent'] and not user.is_verified:
             raise serializers.ValidationError({
                 'email_verification': 'Please verify your email address before logging in.',
                 'verification_required': True,
@@ -283,37 +284,6 @@ class ResetPasswordSerializer(serializers.Serializer):
         self.user.save()
         PasswordResetOTP.objects.filter(user=self.user).update(is_used=True)
         return self.user
-    
-class AdminLoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    password = serializers.CharField(write_only=True, style={'input_type': 'password'})
-    
-    def validate(self, attrs):
-        email = attrs.get('email')
-        password = attrs.get('password')
-
-        user = authenticate(username=email, password=password)
-        if not user:
-            raise serializers.ValidationError(_("Invalid email or password"))
-
-        if user.user_type not in ['admin', 'subadmin']:
-            raise serializers.ValidationError(_("You are not authorized to access this portal."))
-
-        if not user.is_active:
-            raise serializers.ValidationError(_("User account is disabled"))
-
-        refresh = RefreshToken.for_user(user)
-
-        return {
-            'refresh': str(refresh),
-            'access': str(refresh.access_token),
-            'user': {
-                'id': user.id,
-                'email': user.email,
-                'user_type': user.user_type,
-                'full_name': user.get_full_name() if hasattr(user, 'get_full_name') else user.email,
-            }
-        }
     
 class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta:

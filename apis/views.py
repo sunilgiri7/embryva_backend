@@ -129,21 +129,22 @@ def parent_signup(request):
 @permission_classes([AllowAny])
 def user_login(request):
     """
-    Login user - requires verified email address
+    Login user - supports all user types (parent, clinic, admin, subadmin)
+    Email verification required only for clinic and parent users
     """
     serializer = LoginSerializer(data=request.data, context={'request': request})
     
     if serializer.is_valid():
         user = serializer.validated_data['user']
         
-        # Double check verification status (extra safety)
-        if not user.is_verified:
+        # Double check verification status for clinic and parent users (extra safety)
+        if user.user_type in ['clinic', 'parent'] and not user.is_verified:
             return Response({
                 'message': 'Please verify your email address before logging in.',
                 'success': False
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # User is verified, proceed with login
+        # User is verified or admin/subadmin, proceed with login
         login(request, user)
         tokens = get_tokens_for_user(user)
         
@@ -167,42 +168,6 @@ def user_login(request):
         'message': 'Invalid credentials or missing fields.',
         'success': False
     }, status=status.HTTP_400_BAD_REQUEST)
-
-@swagger_auto_schema(
-    method='post',
-    request_body=AdminLoginSerializer,
-    responses={
-        200: openapi.Response(
-            description="Login successful",
-            schema=openapi.Schema(
-                type=openapi.TYPE_OBJECT,
-                properties={
-                    'access': openapi.Schema(type=openapi.TYPE_STRING),
-                    'refresh': openapi.Schema(type=openapi.TYPE_STRING),
-                    'user': openapi.Schema(
-                        type=openapi.TYPE_OBJECT,
-                        properties={
-                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                            'email': openapi.Schema(type=openapi.TYPE_STRING),
-                            'user_type': openapi.Schema(type=openapi.TYPE_STRING),
-                            'full_name': openapi.Schema(type=openapi.TYPE_STRING)
-                        }
-                    )
-                }
-            )
-        ),
-        400: "Invalid credentials"
-    },
-    operation_description="Login for Admin or SubAdmin",
-    tags=['Authentication']
-)
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def admin_login_view(request):
-    serializer = AdminLoginSerializer(data=request.data, context={'request': request})
-    if serializer.is_valid():
-        return Response(serializer.validated_data, status=status.HTTP_200_OK)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # ----------------------- CREATE  CLINIC -------------------------------
 @api_view(["POST"])

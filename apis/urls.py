@@ -8,7 +8,6 @@ urlpatterns = [
     path('verify-email/<uuid:token>/', views.verify_email, name='verify_email'),
     path('resend-verification/', views.resend_verification_email, name='resend_verification'),
     path('auth/login/', views.user_login, name='user-login'),
-    path('auth/admin-login/', views.admin_login_view, name='admin-login'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
     path('auth/profile/', views.user_profile, name='user-profile'),
     
