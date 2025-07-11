@@ -65,8 +65,19 @@ class LoginSerializer(serializers.Serializer):
     def validate(self, attrs):
         email = attrs.get('email')
         password = attrs.get('password')
-
+        
+        # Debug: Check what user exists with this email
+        try:
+            user_by_email = User.objects.get(email=email)
+            print(f"User found by email {email}: {user_by_email} (ID: {user_by_email.id})")
+        except User.DoesNotExist:
+            print(f"No user found with email: {email}")
+        
+        # Debug: Check what authenticate returns
+        print(f"Trying to authenticate with email: {email}")
         user = authenticate(request=self.context.get('request'), username=email, password=password)
+        print(f"Authenticate returned: {user} (ID: {user.id if user else 'None'})")
+        
         if not user:
             raise serializers.ValidationError('Invalid email or password')
 
