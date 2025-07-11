@@ -73,7 +73,8 @@ class LoginSerializer(serializers.Serializer):
         if not user.is_active:
             raise serializers.ValidationError('User account is disabled')
 
-        if not user.is_verified:
+        # Only check email verification for clinic and parent users
+        if user.user_type in ['clinic', 'parent'] and not user.is_verified:
             raise serializers.ValidationError({
                 'email_verification': 'Please verify your email address before logging in.',
                 'verification_required': True,
@@ -166,14 +167,15 @@ class UserSerializer(serializers.ModelSerializer):
     is_subadmin  = serializers.SerializerMethodField()
     is_clinic    = serializers.SerializerMethodField()
     is_parent    = serializers.SerializerMethodField()
+    profile_image_url = serializers.SerializerMethodField()
 
     class Meta:
         model  = User
         fields = [
             "id", "first_name", "last_name", "email", "phone_number",
-            "user_type", "is_verified", "created_at",
+            "user_type", "is_verified", "created_at", "profile_image",
             "relationship_to_child", "specialization", "years_of_experience",
-            "is_admin", "is_subadmin", "is_clinic", "is_parent",
+            "is_admin", "is_subadmin", "is_clinic", "is_parent", "profile_image_url",
         ]
         read_only_fields = ["id", "user_type", "created_at"]
 
@@ -182,6 +184,45 @@ class UserSerializer(serializers.ModelSerializer):
     def get_is_subadmin(self, obj): return obj.is_subadmin
     def get_is_clinic(self, obj):   return obj.is_clinic
     def get_is_parent(self, obj):   return obj.is_parent
+    
+    def get_profile_image_url(self, obj):
+        if obj.profile_image:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.profile_image.url)
+            return obj.profile_image.url
+        return None
+    
+class AdminProfileUpdateSerializer(serializers.ModelSerializer):
+    profile_image = serializers.ImageField(required=False)
+    
+    class Meta:
+        model = User
+        fields = [
+            'first_name', 'last_name', 'email', 'phone_number', 'profile_image'
+        ]
+    
+    def validate_email(self, value):
+        user = self.instance
+        if User.objects.filter(email=value).exclude(pk=user.pk).exists():
+            raise serializers.ValidationError("User with this email already exists")
+        return value
+    
+    def update(self, instance, validated_data):
+        # Handle profile image update
+        profile_image = validated_data.pop('profile_image', None)
+        if profile_image:
+            # Delete old image if exists
+            if instance.profile_image:
+                instance.profile_image.delete()
+            instance.profile_image = profile_image
+        
+        # Update other fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        
+        instance.save()
+        return instance
 
 # ---------------------------- SEND OTP -------------------------------
 class ForgotPasswordEmailSerializer(serializers.Serializer):
@@ -283,37 +324,6 @@ class ResetPasswordSerializer(serializers.Serializer):
         self.user.save()
         PasswordResetOTP.objects.filter(user=self.user).update(is_used=True)
         return self.user
-    
-class AdminLoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    password = serializers.CharField(write_only=True, style={'input_type': 'password'})
-    
-    def validate(self, attrs):
-        email = attrs.get('email')
-        password = attrs.get('password')
-
-        user = authenticate(username=email, password=password)
-        if not user:
-            raise serializers.ValidationError(_("Invalid email or password"))
-
-        if user.user_type not in ['admin', 'subadmin']:
-            raise serializers.ValidationError(_("You are not authorized to access this portal."))
-
-        if not user.is_active:
-            raise serializers.ValidationError(_("User account is disabled"))
-
-        refresh = RefreshToken.for_user(user)
-
-        return {
-            'refresh': str(refresh),
-            'access': str(refresh.access_token),
-            'user': {
-                'id': user.id,
-                'email': user.email,
-                'user_type': user.user_type,
-                'full_name': user.get_full_name() if hasattr(user, 'get_full_name') else user.email,
-            }
-        }
     
 class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta:
@@ -825,12 +835,7 @@ class DonorListSerializer(serializers.ModelSerializer):
 class DonorImportSerializer(serializers.Serializer):
     """Serializer for importing donor data from files"""
     file = serializers.FileField()
-    donor_type = serializers.ChoiceField(choices=[
-        ('sperm', 'Sperm Donor'),
-        ('egg', 'Egg Donor'),
-        ('embryo', 'Embryo Donor'),
-    ])
-    
+
     def validate_file(self, value):
         """Validate file type and size"""
         ext = os.path.splitext(value.name)[1].lower()
@@ -850,11 +855,6 @@ class DonorImportSerializer(serializers.Serializer):
 class DonorImportPreviewSerializer(serializers.Serializer):
     """Serializer for donor import preview data"""
     file = serializers.FileField()
-    donor_type = serializers.ChoiceField(choices=[
-        ('sperm', 'Sperm Donor'),
-        ('egg', 'Egg Donor'),
-        ('embryo', 'Embryo Donor'),
-    ])
     rows_limit = serializers.IntegerField(default=10, min_value=1, max_value=100)
 
 #############################AI MATCHING SERIALIZERS####################################

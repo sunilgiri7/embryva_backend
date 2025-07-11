@@ -1,7 +1,11 @@
+from typing import Set
 from django.core.mail import send_mail
 from django.conf import settings
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
+import random
+import string
+from .models import Donor
 
 def send_verification_email(user, request=None):
     # Get domain - you can customize this based on your setup
@@ -81,3 +85,25 @@ def send_verification_email(user, request=None):
     except Exception as e:
         print(f"Failed to send verification email: {e}")
         return False
+
+def generate_unique_donor_id(donor_type: str, existing_ids: Set[str]) -> str:
+    prefix = 'EMB'  # Main prefix
+    donor_type_prefix = {
+        'sperm': 'SP',
+        'egg': 'EG',
+        'embryo': 'EM'
+    }.get(str(donor_type).lower(), 'DN')  # Default prefix 'DN'
+
+    # Loop to ensure the generated ID is unique
+    while True:
+        random_suffix = ''.join(random.choices(string.digits, k=6))
+        potential_id = f"{prefix}{donor_type_prefix}{random_suffix}"
+        
+        # First, check against the fast in-memory set for the current batch.
+        # Then, check against the database for all-time uniqueness.
+        if potential_id not in existing_ids and not Donor.objects.filter(donor_id=potential_id).exists():
+            
+            # Add the new ID to the session set to prevent duplicates within the same file.
+            existing_ids.add(potential_id)
+            
+            return potential_id

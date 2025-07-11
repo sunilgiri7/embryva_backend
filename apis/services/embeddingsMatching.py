@@ -67,6 +67,9 @@ class EmbeddingService:
             birth_date = donor_data.get('date_of_birth')
             age = 'unknown age'
             if birth_date:
+                # Ensure birth_date is a date object
+                if isinstance(birth_date, str):
+                    birth_date = datetime.strptime(birth_date, '%Y-%m-%d').date()
                 today = date.today()
                 age_val = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
                 age = f"{age_val} years old"
@@ -183,6 +186,60 @@ class EmbeddingService:
             "similarity_score": float(match.score),
             "metadata": match.metadata
         } for match in search_response.matches]
+
+    def bulk_process_and_store_embeddings(self, donor_data_list: List[Dict]):
+        """
+        Generates and stores embeddings for a batch of donors efficiently.
+        This is the preferred method for bulk imports.
+        """
+        if not donor_data_list:
+            return
+
+        logger.info(f"Starting bulk embedding generation for {len(donor_data_list)} donors.")
+        self.initialize_model()
+        self.initialize_pinecone()
+
+        try:
+            # Step 1: Create descriptive texts for all donors
+            texts_to_embed = [self.create_donor_text(data) for data in donor_data_list]
+
+            # Step 2: Generate embeddings in a single batch call for max efficiency
+            embeddings = self.model.encode(texts_to_embed, convert_to_tensor=False, show_progress_bar=False)
+
+            # Step 3: Prepare vectors for Pinecone upsert
+            vectors_to_upsert = []
+            for i, donor_data in enumerate(donor_data_list):
+                donor_id = donor_data['donor_id']
+                clinic_id = str(donor_data['clinic_id'])
+                
+                metadata = {
+                    'donor_id': donor_id,
+                    'clinic_id': clinic_id,
+                    'donor_type': donor_data.get('donor_type'),
+                    'gender': donor_data.get('gender'),
+                    'education_level': donor_data.get('education_level'),
+                    'ethnicity': donor_data.get('ethnicity'),
+                    'location': donor_data.get('location'),
+                    'created_at': datetime.now().isoformat(),
+                }
+                
+                vectors_to_upsert.append({
+                    "id": f"{clinic_id}_{donor_id}",
+                    "values": embeddings[i].tolist(),
+                    "metadata": metadata
+                })
+            
+            # Step 4: Upsert all vectors in a single batch call to Pinecone
+            if vectors_to_upsert:
+                # Pinecone's upsert can handle large batches, but chunking is safer for very large imports
+                batch_size = 100 
+                for i in range(0, len(vectors_to_upsert), batch_size):
+                    batch = vectors_to_upsert[i:i + batch_size]
+                    self.index.upsert(vectors=batch)
+                logger.info(f"Successfully upserted {len(vectors_to_upsert)} embeddings to Pinecone in batches.")
+
+        except Exception as e:
+            logger.error(f"Failed during bulk embedding process: {e}", exc_info=True)
 
 
 # ================== MATCHING ENGINE (UPGRADED) ==================

@@ -8,7 +8,6 @@ urlpatterns = [
     path('verify-email/<uuid:token>/', views.verify_email, name='verify_email'),
     path('resend-verification/', views.resend_verification_email, name='resend_verification'),
     path('auth/login/', views.user_login, name='user-login'),
-    path('auth/admin-login/', views.admin_login_view, name='admin-login'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
     path('auth/profile/', views.user_profile, name='user-profile'),
     
@@ -16,6 +15,8 @@ urlpatterns = [
     path('admin/users/subadmins/', views.subadmin_list, name='subadmin-list'),
     path('admin/users/clinics/', views.clinic_list, name='clinic-list'),
     path('admin/users/parents/', views.parent_list, name='parent-list'),
+    path('admin/profile/update/', views.admin_profile_update, name='admin-profile-update'),
+    path('admin/profile/image/', views.profile_image_upload, name='profile-image-upload'),
     
     # ================ SUBADMIN MANAGEMENT (CRUD) ADMIN ONLY APIS ================
     path('admin/subadmin/create/', views.create_subadmin, name='create-subadmin'),  # existing

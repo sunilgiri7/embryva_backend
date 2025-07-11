@@ -1,7 +1,8 @@
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import io
 import logging
+import threading
 from rest_framework import status, generics, permissions
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
@@ -12,8 +13,10 @@ from drf_yasg import openapi
 from django.contrib.auth import login
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
+import urllib
 from apis.email_service import EmailService
 from apis.services.embeddingsMatching import DonorMatchingEngine, EmbeddingService, MatchResult
+from apis.utils import generate_unique_donor_id
 from .models import Appointment, MatchingResult, Meeting, User
 from django.db.models import Q, Count
 from .serializers import *
@@ -131,21 +134,22 @@ def parent_signup(request):
 @permission_classes([AllowAny])
 def user_login(request):
     """
-    Login user - requires verified email address
+    Login user - supports all user types (parent, clinic, admin, subadmin)
+    Email verification required only for clinic and parent users
     """
     serializer = LoginSerializer(data=request.data, context={'request': request})
     
     if serializer.is_valid():
         user = serializer.validated_data['user']
         
-        # Double check verification status (extra safety)
-        if not user.is_verified:
+        # Double check verification status for clinic and parent users (extra safety)
+        if user.user_type in ['clinic', 'parent'] and not user.is_verified:
             return Response({
                 'message': 'Please verify your email address before logging in.',
                 'success': False
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        # User is verified, proceed with login
+        # User is verified or admin/subadmin, proceed with login
         login(request, user)
         tokens = get_tokens_for_user(user)
         
@@ -169,42 +173,6 @@ def user_login(request):
         'message': 'Invalid credentials or missing fields.',
         'success': False
     }, status=status.HTTP_400_BAD_REQUEST)
-
-@swagger_auto_schema(
-    method='post',
-    request_body=AdminLoginSerializer,
-    responses={
-        200: openapi.Response(
-            description="Login successful",
-            schema=openapi.Schema(
-                type=openapi.TYPE_OBJECT,
-                properties={
-                    'access': openapi.Schema(type=openapi.TYPE_STRING),
-                    'refresh': openapi.Schema(type=openapi.TYPE_STRING),
-                    'user': openapi.Schema(
-                        type=openapi.TYPE_OBJECT,
-                        properties={
-                            'id': openapi.Schema(type=openapi.TYPE_INTEGER),
-                            'email': openapi.Schema(type=openapi.TYPE_STRING),
-                            'user_type': openapi.Schema(type=openapi.TYPE_STRING),
-                            'full_name': openapi.Schema(type=openapi.TYPE_STRING)
-                        }
-                    )
-                }
-            )
-        ),
-        400: "Invalid credentials"
-    },
-    operation_description="Login for Admin or SubAdmin",
-    tags=['Authentication']
-)
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def admin_login_view(request):
-    serializer = AdminLoginSerializer(data=request.data, context={'request': request})
-    if serializer.is_valid():
-        return Response(serializer.validated_data, status=status.HTTP_200_OK)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # ----------------------- CREATE  CLINIC -------------------------------
 @api_view(["POST"])
@@ -393,10 +361,133 @@ class UserListView(generics.ListAPIView):
 @permission_classes([IsAuthenticated])
 def user_profile(request):
     """
-    Get current user profile
+    Get current user profile for all user types (admin, parent, clinic, subadmin)
     """
-    serializer = UserSerializer(request.user)
-    return Response(serializer.data)
+    serializer = UserSerializer(request.user, context={'request': request})
+    return Response({
+        'success': True,
+        'user': serializer.data
+    })
+
+@swagger_auto_schema(
+    method='put',
+    request_body=AdminProfileUpdateSerializer,
+    responses={
+        200: openapi.Response(
+            description="Profile updated successfully",
+            schema=UserSerializer
+        ),
+        400: "Bad Request - Validation errors",
+        403: "Forbidden - Only admins can update profiles"
+    },
+    operation_description="Update admin profile (admin only)",
+    tags=['Profile']
+)
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+def admin_profile_update(request):
+    """
+    Update admin profile - only accessible by admin users
+    """
+    if not request.user.is_admin:
+        return Response(
+            {"detail": "Only admins can update profiles."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    serializer = AdminProfileUpdateSerializer(
+        request.user, 
+        data=request.data, 
+        partial=True,
+        context={'request': request}
+    )
+    
+    if serializer.is_valid():
+        user = serializer.save()
+        response_serializer = UserSerializer(user, context={'request': request})
+        return Response({
+            'success': True,
+            'message': 'Profile updated successfully',
+            'user': response_serializer.data
+        }, status=status.HTTP_200_OK)
+    
+    return Response({
+        'success': False,
+        'errors': serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+# New profile_image_upload view for handling image upload separately
+@swagger_auto_schema(
+    method='post',
+    manual_parameters=[
+        openapi.Parameter(
+            'profile_image',
+            openapi.IN_FORM,
+            description="Profile image file",
+            type=openapi.TYPE_FILE,
+            required=True
+        )
+    ],
+    responses={
+        200: openapi.Response(
+            description="Profile image uploaded successfully",
+            schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'success': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'message': openapi.Schema(type=openapi.TYPE_STRING),
+                    'profile_image_url': openapi.Schema(type=openapi.TYPE_STRING)
+                }
+            )
+        ),
+        400: "Bad Request - Invalid image file",
+        403: "Forbidden - Only admins can upload images"
+    },
+    operation_description="Upload profile image (admin only)",
+    tags=['Profile']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def profile_image_upload(request):
+    """
+    Upload profile image - only accessible by admin users
+    """
+    if not request.user.is_admin:
+        return Response(
+            {"detail": "Only admins can upload profile images."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    if 'profile_image' not in request.FILES:
+        return Response({
+            'success': False,
+            'message': 'No image file provided'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    profile_image = request.FILES['profile_image']
+    
+    # Validate image file
+    if not profile_image.content_type.startswith('media/'):
+        return Response({
+            'success': False,
+            'message': 'Invalid image file'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Delete old image if exists
+    if request.user.profile_image:
+        request.user.profile_image.delete()
+    
+    # Save new image
+    request.user.profile_image = profile_image
+    request.user.save()
+    
+    profile_image_url = request.build_absolute_uri(request.user.profile_image.url)
+    
+    return Response({
+        'success': True,
+        'message': 'Profile image uploaded successfully',
+        'profile_image_url': profile_image_url
+    }, status=status.HTTP_200_OK)
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -1354,17 +1445,22 @@ def send_meeting_reminders(request, meeting_id):
                 'scheduled_meetings': openapi.Schema(type=openapi.TYPE_INTEGER),
                 'ongoing_meetings': openapi.Schema(type=openapi.TYPE_INTEGER),
                 'completed_meetings': openapi.Schema(type=openapi.TYPE_INTEGER),
+                'total_users': openapi.Schema(type=openapi.TYPE_INTEGER),
+                'total_active_users': openapi.Schema(type=openapi.TYPE_INTEGER),
+                'total_clinics': openapi.Schema(type=openapi.TYPE_INTEGER),
+                'subscriber_users': openapi.Schema(type=openapi.TYPE_INTEGER),
+                'total_subadmins': openapi.Schema(type=openapi.TYPE_INTEGER),
             }
         )
     )},
-    operation_description="Get appointment and meeting statistics for dashboard",
+    operation_description="Get appointment, meeting, and user statistics for dashboard",
     tags=['Dashboard']
 )
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_stats(request):
     """
-    Admin/SubAdmin: Get dashboard statistics for appointment management
+    Admin/SubAdmin: Get dashboard statistics for appointment management and user stats
     """
     if not (request.user.is_admin or request.user.is_subadmin):
         return Response(
@@ -1390,6 +1486,21 @@ def dashboard_stats(request):
         cancelled=Count('id', filter=Q(status='cancelled')),
     )
     
+    # User statistics
+    user_stats = User.objects.aggregate(
+        total_users=Count('id'),
+        total_active_users=Count('id', filter=Q(is_active=True)),
+        total_clinics=Count('id', filter=Q(user_type='clinic')),
+        total_subadmins=Count('id', filter=Q(user_type='subadmin')),
+    )
+    
+    # Subscriber users (users with active subscriptions)
+    subscriber_users = UserSubscription.objects.filter(
+        status='active',
+        start_date__lte=timezone.now(),
+        end_date__gte=timezone.now()
+    ).values('user').distinct().count()
+    
     # Recent appointments
     recent_appointments = Appointment.objects.select_related('clinic').order_by('-created_at')[:5]
     recent_appointments_data = AppointmentDetailSerializer(recent_appointments, many=True).data
@@ -1406,6 +1517,13 @@ def dashboard_stats(request):
         'statistics': {
             'appointments': appointment_stats,
             'meetings': meeting_stats,
+            'users': {
+                'total_users': user_stats['total_users'],
+                'total_active_users': user_stats['total_active_users'],
+                'total_clinics': user_stats['total_clinics'],
+                'subscriber_users': subscriber_users,
+                'total_subadmins': user_stats['total_subadmins'],
+            }
         },
         'recent_appointments': recent_appointments_data,
         'upcoming_meetings': upcoming_meetings_data
@@ -2151,34 +2269,8 @@ def download_donor_template(request):
 @swagger_auto_schema(
     method='post',
     request_body=DonorImportPreviewSerializer,
-    responses={
-        200: openapi.Response(
-            description="File preview generated successfully",
-            schema=openapi.Schema(
-                type=openapi.TYPE_OBJECT,
-                properties={
-                    'success': openapi.Schema(type=openapi.TYPE_BOOLEAN),
-                    'preview_data': openapi.Schema(
-                        type=openapi.TYPE_ARRAY,
-                        items=openapi.Items(type=openapi.TYPE_STRING)
-                    ),
-                    'total_rows': openapi.Schema(type=openapi.TYPE_INTEGER),
-                    'columns': openapi.Schema(
-                        type=openapi.TYPE_ARRAY,
-                        items=openapi.Items(type=openapi.TYPE_STRING)
-                    ),
-                    'validation_errors': openapi.Schema(
-                        type=openapi.TYPE_ARRAY,
-                        items=openapi.Items(type=openapi.TYPE_STRING)
-                    ),
-                    'valid_rows': openapi.Schema(type=openapi.TYPE_INTEGER),
-                    'invalid_rows': openapi.Schema(type=openapi.TYPE_INTEGER)
-                }
-            )
-        ),
-        400: "Bad Request"
-    },
-    operation_description="Preview imported donor data before final import",
+    responses={200: openapi.Response("File preview generated successfully")},
+    operation_description="Preview imported donor data before final import. Reads donor_type from file.",
     tags=['Donor Management']
 )
 @api_view(['POST'])
@@ -2187,100 +2279,49 @@ def download_donor_template(request):
 def preview_donor_import(request):
     """Preview donor data from uploaded file - Clinic only"""
     if not request.user.is_clinic:
-        return Response(
-            {"detail": "Only clinics can preview donor imports."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
+        return Response({"detail": "Only clinics can preview donor imports."}, status=status.HTTP_403_FORBIDDEN)
     
     serializer = DonorImportPreviewSerializer(data=request.data)
     if not serializer.is_valid():
-        return Response({
-            'success': False,
-            'errors': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
     
     file = serializer.validated_data['file']
-    donor_type = serializer.validated_data['donor_type']
     rows_limit = serializer.validated_data['rows_limit']
     
     try:
-        # Parse file based on extension
         file_ext = os.path.splitext(file.name)[1].lower()
-        
+        file.seek(0)
         if file_ext == '.csv':
-            # Reset file pointer and read with proper encoding
-            file.seek(0)
-            content = file.read().decode('utf-8')
-            # URL decode the content
-            import urllib.parse
-            content = urllib.parse.unquote_plus(content)
-            df = pd.read_csv(io.StringIO(content))
+            content = file.read().decode('utf-8-sig')
+            df = pd.read_csv(io.StringIO(urllib.parse.unquote_plus(content)))
         elif file_ext in ['.xlsx', '.xls']:
             df = pd.read_excel(file)
         elif file_ext == '.json':
-            file.seek(0)
-            json_data = json.loads(file.read().decode('utf-8'))
-            df = pd.DataFrame(json_data)
+            df = pd.DataFrame(json.loads(file.read().decode('utf-8-sig')))
         else:
-            return Response({
-                'success': False,
-                'message': 'Unsupported file format'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success': False, 'message': 'Unsupported file format'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Clean column names (remove extra spaces)
         df.columns = df.columns.str.strip()
-        
-        # Check if DataFrame is empty
         if df.empty:
-            return Response({
-                'success': False,
-                'message': 'The uploaded file is empty or contains no valid data'
-            }, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'success': False, 'message': 'The uploaded file is empty'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Get preview data (limited rows)
         preview_df = df.head(rows_limit)
-        
-        # Convert DataFrame to list of dictionaries for JSON response
         preview_data = []
-        validation_errors = []
         
         for index, row in preview_df.iterrows():
-            row_data = {}
-            row_errors = []
+            row_number = index + 2  # Header is row 1
+            row_data = {col: None if pd.isna(val) else val for col, val in row.items()}
             
-            for col in df.columns:
-                value = row[col]
-                # Handle NaN values
-                if pd.isna(value):
-                    row_data[col] = None
-                else:
-                    # Clean and decode the value
-                    if isinstance(value, str):
-                        # URL decode and clean
-                        import urllib.parse
-                        cleaned_value = urllib.parse.unquote_plus(str(value)).strip()
-                        row_data[col] = cleaned_value
-                    else:
-                        row_data[col] = str(value)
-            
-            # Basic validation for preview
-            row_validation = validate_donor_row(row_data, donor_type, index + 1)
-            if row_validation['errors']:
-                row_errors = row_validation['errors']
+            validation_result = validate_donor_row(row_data, row_number)
             
             preview_data.append({
-                'row_number': index + 1,
-                'data': row_data,
-                'errors': row_errors,
-                'is_valid': len(row_errors) == 0
+                'row_number': row_number,
+                'data': {k: str(v) if pd.notna(v) else None for k, v in row_data.items()},
+                'errors': validation_result['errors'],
+                'is_valid': not bool(validation_result['errors'])
             })
             
-            if row_errors:
-                validation_errors.extend(row_errors)
-        
-        # Count valid/invalid rows
-        valid_rows = sum(1 for row in preview_data if row['is_valid'])
-        invalid_rows = len(preview_data) - valid_rows
+        valid_rows_count = sum(1 for item in preview_data if item['is_valid'])
         
         return Response({
             'success': True,
@@ -2288,278 +2329,182 @@ def preview_donor_import(request):
             'total_rows': len(df),
             'preview_rows': len(preview_data),
             'columns': list(df.columns),
-            'validation_errors': validation_errors,
-            'valid_rows': valid_rows,
-            'invalid_rows': invalid_rows,
-            'donor_type': donor_type
+            'valid_rows': valid_rows_count,
+            'invalid_rows': len(preview_data) - valid_rows_count,
         })
     
     except Exception as e:
-        return Response({
-            'success': False,
-            'message': f'Error processing file: {str(e)}'
-        }, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'success': False, 'message': f'Error processing file: {str(e)}'}, status=status.HTTP_400_BAD_REQUEST)
 
 @swagger_auto_schema(
     method='post',
     request_body=DonorImportSerializer,
-    responses={
-        200: openapi.Response(
-            description="Donors imported successfully",
-            schema=openapi.Schema(
-                type=openapi.TYPE_OBJECT,
-                properties={
-                    'success': openapi.Schema(type=openapi.TYPE_BOOLEAN),
-                    'message': openapi.Schema(type=openapi.TYPE_STRING),
-                    'imported_count': openapi.Schema(type=openapi.TYPE_INTEGER),
-                    'failed_count': openapi.Schema(type=openapi.TYPE_INTEGER),
-                    'errors': openapi.Schema(
-                        type=openapi.TYPE_ARRAY,
-                        items=openapi.Items(type=openapi.TYPE_STRING)
-                    ),
-                    'imported_donors': openapi.Schema(
-                        type=openapi.TYPE_ARRAY,
-                        items=openapi.Schema(
-                            type=openapi.TYPE_OBJECT,
-                            properties={
-                                'name': openapi.Schema(type=openapi.TYPE_STRING),
-                                'email': openapi.Schema(type=openapi.TYPE_STRING),
-                                'phone': openapi.Schema(type=openapi.TYPE_STRING),
-                                # add more fields if needed
-                            }
-                        )
-                    )
-                }
-            )
-        ),
-        400: "Bad Request"
-    },
-    operation_description="Import donor data from CSV/Excel/JSON file (Clinic only)",
+    responses={200: openapi.Response("Donors imported successfully")},
+    operation_description="Import donor data from CSV/Excel/JSON file (Clinic only). Uses bulk processing.",
     tags=['Donor Management']
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 @parser_classes([MultiPartParser, FormParser])
 def import_donors(request):
-    """Import donor data from file - Clinic only (Complete Implementation)"""
+    """Import donor data from file - Clinic only (Bulk Implementation)"""
     if not request.user.is_clinic:
-        return Response(
-            {"detail": "Only clinics can import donors."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
+        return Response({"detail": "Only clinics can import donors."}, status=status.HTTP_403_FORBIDDEN)
     
     serializer = DonorImportSerializer(data=request.data)
     if not serializer.is_valid():
-        return Response({
-            'success': False,
-            'errors': serializer.errors
-        }, status=status.HTTP_400_BAD_REQUEST)
-    
+        return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
     file = serializer.validated_data['file']
-    donor_type = serializer.validated_data['donor_type']
     
     try:
-        # Parse file based on extension
         file_ext = os.path.splitext(file.name)[1].lower()
-        
+        file.seek(0)
         if file_ext == '.csv':
-            # Reset file pointer and read with proper encoding
-            file.seek(0)
-            content = file.read().decode('utf-8')
-            # URL decode the content
-            import urllib.parse
-            content = urllib.parse.unquote_plus(content)
-            df = pd.read_csv(io.StringIO(content))
+            content = file.read().decode('utf-8-sig')
+            df = pd.read_csv(io.StringIO(urllib.parse.unquote_plus(content)))
         elif file_ext in ['.xlsx', '.xls']:
             df = pd.read_excel(file)
         elif file_ext == '.json':
-            file.seek(0)
-            json_data = json.loads(file.read().decode('utf-8'))
-            df = pd.DataFrame(json_data)
+            df = pd.DataFrame(json.loads(file.read().decode('utf-8-sig')))
         else:
-            return Response({
-                'success': False,
-                'message': 'Unsupported file format'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Clean column names and decode them
+            return Response({'success': False, 'message': 'Unsupported file format'}, status=status.HTTP_400_BAD_REQUEST)
+
         df.columns = df.columns.str.strip()
-        
-        # Check if DataFrame is empty
         if df.empty:
-            return Response({
-                'success': False,
-                'message': 'The uploaded file is empty or contains no valid data'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        imported_count = 0
-        failed_count = 0
-        errors = []
-        imported_donors = []
-        
-        # Process each row
+            return Response({'success': False, 'message': 'The uploaded file is empty.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        donors_to_create = []
+        embedding_data_list = []
+        failed_rows = []
+        generated_ids_in_session = set()
+
         for index, row in df.iterrows():
-            row_number = index + 1
-            try:
-                with transaction.atomic():
-                    # Convert row to dictionary and clean data
-                    row_data = {}
-                    for col in df.columns:
-                        value = row[col]
-                        if pd.isna(value):
-                            row_data[col] = None
-                        else:
-                            # Clean and decode the value
-                            if isinstance(value, str):
-                                # URL decode and clean
-                                cleaned_value = urllib.parse.unquote_plus(str(value)).strip()
-                                row_data[col] = cleaned_value
-                            else:
-                                row_data[col] = value
-                    
-                    # Skip empty rows
-                    if all(v is None or str(v).strip() == '' for v in row_data.values()):
-                        continue
-                    
-                    # Validate row data
-                    validation_result = validate_donor_row(row_data, donor_type, row_number)
-                    if validation_result['errors']:
-                        failed_count += 1
-                        errors.extend(validation_result['errors'])
-                        continue
-                    
-                    # Process and create donor
-                    processed_data = process_donor_data(row_data, donor_type, request.user)
-                    
-                    # Create donor with error handling
-                    try:
-                        donor = Donor.objects.create(**processed_data)
-                        imported_count += 1
-                        imported_donors.append({
-                            'donor_id': donor.donor_id,
-                            'name': donor.full_name,
-                            'donor_type': donor.donor_type,
-                            'row_number': row_number
-                        })
-                    except Exception as create_error:
-                        failed_count += 1
-                        errors.append({
-                            'row': row_number,
-                            'error': f'Database error: {str(create_error)}'
-                        })
+            row_number = index + 2 # Header is row 1
+            row_data = {col: None if pd.isna(val) else val for col, val in row.items()}
             
+            if all(v is None or str(v).strip() == '' for v in row_data.values()):
+                continue
+
+            validation_result = validate_donor_row(row_data, row_number)
+            if validation_result['errors']:
+                failed_rows.extend(validation_result['errors'])
+                continue
+
+            processed_data = process_donor_data(row_data, request.user)
+            current_donor_type = processed_data.get('donor_type', 'dn')
+            
+            try:
+                donor_id = generate_unique_donor_id(current_donor_type, generated_ids_in_session)
+                processed_data['donor_id'] = donor_id
+                
+                donors_to_create.append(Donor(**processed_data))
+                
+                embedding_data = processed_data.copy()
+                embedding_data['clinic_id'] = request.user.id
+                embedding_data_list.append(embedding_data)
             except Exception as e:
-                failed_count += 1
-                errors.append({
-                    'row': row_number,
-                    'error': f'Processing error: {str(e)}'
-                })
-        
-        # Prepare response message
-        if imported_count > 0:
-            message = f'Import completed. {imported_count} donors imported successfully'
-            if failed_count > 0:
-                message += f', {failed_count} rows failed'
-        else:
-            message = f'Import failed. {failed_count} rows had errors'
-        
+                failed_rows.append({'row': row_number, 'error': f'Failed to process row: {str(e)}'})
+
+        if donors_to_create:
+            with transaction.atomic():
+                Donor.objects.bulk_create(donors_to_create, ignore_conflicts=False)
+
+            if embedding_data_list:
+                embedding_service = EmbeddingService()
+                thread = threading.Thread(
+                    target=embedding_service.bulk_process_and_store_embeddings,
+                    args=(embedding_data_list,)
+                )
+                thread.daemon = True
+                thread.start()
+
+        imported_count = len(donors_to_create)
+        message = f'Import process finished. {imported_count} donors queued for creation.'
+        if failed_rows:
+            message += f' {len(failed_rows)} rows failed validation.'
+
         return Response({
             'success': imported_count > 0,
             'message': message,
             'imported_count': imported_count,
-            'failed_count': failed_count,
-            'errors': errors,
-            'imported_donors': imported_donors
+            'failed_count': len(failed_rows),
+            'errors': failed_rows,
+            'imported_donors': [{'donor_id': d.donor_id, 'name': d.full_name} for d in donors_to_create]
         })
-    
+
     except Exception as e:
-        return Response({
-            'success': False,
-            'message': f'Import failed: {str(e)}'
-        }, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'success': False, 'message': f'An unexpected error occurred: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # Helper Functions
-def validate_donor_row(row_data, donor_type, row_number):
-    """Validate individual donor row data"""
+def validate_donor_row(row_data, row_number):
+    """
+    Validates individual donor row data, checking for required fields
+    and valid values within the row itself.
+    """
     errors = []
     
-    # Required fields validation
+    # --- Required Fields Validation ---
     required_fields = [
         'first_name', 'last_name', 'gender', 'date_of_birth', 
-        'phone_number', 'donor_type', 'blood_group'
+        'phone_number', 'blood_group'
     ]
-    
-    # for field in required_fields:
-    #     value = row_data.get(field)
-    #     # Check if field is empty, None, or contains template example data
-    #     if not value or str(value).strip() == '' or str(value).strip() in ['John', 'Doe', 'male/female', '1990-01-15', '+1234567890', 'sperm/egg/embryo', 'A+/A-/B+/B-/AB+/AB-/O+/O-']:
-    #         errors.append({
-    #             'row': row_number,
-    #             'field': field,
-    #             'error': f'{field} is required and cannot be template example data'
-    #         })
-    
-    # Skip further validation if required fields are missing
-    if errors:
-        return {'errors': errors}
+    for field in required_fields:
+        if pd.isna(row_data.get(field)) or str(row_data.get(field, '')).strip() == '':
+            errors.append({
+                'row': row_number,
+                'field': field,
+                'error': f'"{field}" is a required field and cannot be empty.'
+            })
+
+    # --- Donor Type Validation (from row) ---
+    valid_donor_types = [choice[0] for choice in Donor.DONOR_TYPES]
+    donor_type_value = str(row_data.get('donor_type', '')).strip().lower()
+    if not donor_type_value:
+        errors.append({
+            'row': row_number,
+            'field': 'donor_type',
+            'error': '"donor_type" is a required field in the file.'
+        })
+    elif donor_type_value not in valid_donor_types:
+        errors.append({
+            'row': row_number,
+            'field': 'donor_type',
+            'error': f'Invalid donor_type "{row_data.get("donor_type")}". Must be one of: {", ".join(valid_donor_types)}.'
+        })
+
+    # --- Specific Field Content Validation ---
     
     # Validate gender
     gender_value = str(row_data.get('gender', '')).strip().lower()
     if gender_value and gender_value not in ['male', 'female']:
         errors.append({
-            'row': row_number,
-            'field': 'gender',
-            'error': 'Gender must be "male" or "female"'
+            'row': row_number, 'field': 'gender', 'error': 'Gender must be "male" or "female".'
         })
-    
-    # Validate donor_type
-    donor_type_value = str(row_data.get('donor_type', '')).strip().lower()
-    if donor_type_value and donor_type_value != donor_type.lower():
-        errors.append({
-            'row': row_number,
-            'field': 'donor_type',
-            'error': f'Donor type must be "{donor_type}"'
-        })
-    
-    # Validate blood group
-    valid_blood_groups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
-    blood_group_value = str(row_data.get('blood_group', '')).strip()
+
+    # # Validate blood group
+    # valid_blood_groups = [choice[0] for choice in Donor.BLOOD_GROUPS]
+    # blood_group_value = str(row_data.get('blood_group', '')).strip().upper()
     # if blood_group_value and blood_group_value not in valid_blood_groups:
     #     errors.append({
-    #         'row': row_number,
-    #         'field': 'blood_group',
-    #         'error': f'Blood group must be one of: {", ".join(valid_blood_groups)}'
+    #         'row': row_number, 'field': 'blood_group',
+    #         'error': f'Blood group must be one of: {", ".join(valid_blood_groups)}.'
     #     })
-    
+
     # Validate date of birth
     dob_value = row_data.get('date_of_birth')
-    if dob_value:
+    if dob_value and pd.notna(dob_value):
         try:
-            # Handle different date formats
-            dob_str = str(dob_value).strip()
-            if dob_str:
-                dob = pd.to_datetime(dob_str).date()
-                today = date.today()
-                age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-                if age < 18:
-                    errors.append({
-                        'row': row_number,
-                        'field': 'date_of_birth',
-                        'error': 'Donor must be at least 18 years old'
-                    })
-                elif age > 65:
-                    errors.append({
-                        'row': row_number,
-                        'field': 'date_of_birth',
-                        'error': 'Donor age cannot exceed 65 years'
-                    })
-        except Exception as e:
-            errors.append({
-                'row': row_number,
-                'field': 'date_of_birth',
-                'error': f'Invalid date format. Use YYYY-MM-DD. Error: {str(e)}'
-            })
-    
+            dob = pd.to_datetime(str(dob_value)).date()
+            today = date.today()
+            age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+            if age < 18:
+                errors.append({'row': row_number, 'field': 'date_of_birth', 'error': 'Donor must be at least 18 years old.'})
+            elif age > 65:
+                errors.append({'row': row_number, 'field': 'date_of_birth', 'error': 'Donor age cannot exceed 65 years.'})
+        except (ValueError, TypeError, pd.errors.OutOfBoundsDatetime):
+            errors.append({'row': row_number, 'field': 'date_of_birth', 'error': 'Invalid date format. Use YYYY-MM-DD.'})
+
     # Validate numeric fields
     numeric_fields = {'height': 'Height', 'weight': 'Weight', 'number_of_children': 'Number of children'}
     for field, display_name in numeric_fields.items():
@@ -2567,148 +2512,76 @@ def validate_donor_row(row_data, donor_type, row_number):
         if value is not None and str(value).strip() != '':
             try:
                 num_value = float(str(value).strip())
-                if field in ['height', 'weight'] and num_value <= 0:
-                    errors.append({
-                        'row': row_number,
-                        'field': field,
-                        'error': f'{display_name} must be greater than 0'
-                    })
-                elif field == 'number_of_children' and num_value < 0:
-                    errors.append({
-                        'row': row_number,
-                        'field': field,
-                        'error': f'{display_name} cannot be negative'
-                    })
+                if num_value < 0:
+                    errors.append({'row': row_number, 'field': field, 'error': f'{display_name} cannot be negative.'})
             except (ValueError, TypeError):
-                errors.append({
-                    'row': row_number,
-                    'field': field,
-                    'error': f'{display_name} must be a valid number'
-                })
-    
+                errors.append({'row': row_number, 'field': field, 'error': f'{display_name} must be a valid number.'})
+
     # Validate boolean fields
     smoking_status = row_data.get('smoking_status')
     if smoking_status is not None and str(smoking_status).strip() != '':
         smoking_str = str(smoking_status).strip().lower()
         if smoking_str not in ['true', 'false', '1', '0', 'yes', 'no']:
-            errors.append({
-                'row': row_number,
-                'field': 'smoking_status',
-                'error': 'Smoking status must be TRUE/FALSE, YES/NO, or 1/0'
-            })
-    
+            errors.append({'row': row_number, 'field': 'smoking_status', 'error': 'Smoking status must be TRUE/FALSE, YES/NO, or 1/0.'})
+            
     return {'errors': errors}
 
-def process_donor_data(row_data, donor_type, clinic_user):
-    """Process and convert row data to Donor model format"""
-    import urllib.parse
+def process_donor_data(row_data, clinic_user):
+    """
+    Processes and converts a single row of data to the Donor model format.
+    """
     processed_data = {}
-    
-    # Map and process each field
+    # Complete field mapping from CSV/Excel column to Donor model field
     field_mapping = {
-        'title': 'title',
-        'first_name': 'first_name',
-        'last_name': 'last_name',
-        'gender': 'gender',
-        'date_of_birth': 'date_of_birth',
-        'phone_number': 'phone_number',
-        'email': 'email',
-        'location': 'location',
-        'address': 'address',
-        'city': 'city',
-        'state': 'state',
-        'country': 'country',
-        'postal_code': 'postal_code',
-        'donor_type': 'donor_type',
-        'blood_group': 'blood_group',
-        'height': 'height',
-        'weight': 'weight',
-        'eye_color': 'eye_color',
-        'hair_color': 'hair_color',
-        'skin_tone': 'skin_tone',
-        'education_level': 'education_level',
-        'occupation': 'occupation',
-        'marital_status': 'marital_status',
-        'religion': 'religion',
-        'ethnicity': 'ethnicity',
-        'medical_history': 'medical_history',
-        'genetic_conditions': 'genetic_conditions',
-        'medications': 'medications',
-        'allergies': 'allergies',
-        'smoking_status': 'smoking_status',
-        'alcohol_consumption': 'alcohol_consumption',
-        'exercise_frequency': 'exercise_frequency',
-        'number_of_children': 'number_of_children',
-        'family_medical_history': 'family_medical_history',
-        'personality_traits': 'personality_traits',
-        'interests_hobbies': 'interests_hobbies',
-        'notes': 'notes'
+        'title': 'title', 'first_name': 'first_name', 'last_name': 'last_name', 'gender': 'gender',
+        'date_of_birth': 'date_of_birth', 'phone_number': 'phone_number', 'email': 'email',
+        'location': 'location', 'address': 'address', 'city': 'city', 'state': 'state',
+        'country': 'country', 'postal_code': 'postal_code', 'donor_type': 'donor_type',
+        'blood_group': 'blood_group', 'height': 'height', 'weight': 'weight',
+        'eye_color': 'eye_color', 'hair_color': 'hair_color', 'skin_tone': 'skin_tone',
+        'education_level': 'education_level', 'occupation': 'occupation', 'marital_status': 'marital_status',
+        'religion': 'religion', 'ethnicity': 'ethnicity', 'medical_history': 'medical_history',
+        'genetic_conditions': 'genetic_conditions', 'medications': 'medications', 'allergies': 'allergies',
+        'smoking_status': 'smoking_status', 'alcohol_consumption': 'alcohol_consumption',
+        'exercise_frequency': 'exercise_frequency', 'number_of_children': 'number_of_children',
+        'family_medical_history': 'family_medical_history', 'personality_traits': 'personality_traits',
+        'interests_hobbies': 'interests_hobbies', 'notes': 'notes'
     }
-    
+
     for csv_field, model_field in field_mapping.items():
-        if csv_field in row_data and row_data[csv_field] is not None:
-            value = row_data[csv_field]
-            
-            # Skip empty values
-            if str(value).strip() == '':
-                continue
-                
-            # URL decode the value if it's a string
-            if isinstance(value, str):
-                value = urllib.parse.unquote_plus(value.strip())
-            
-            # Special processing for specific fields
-            try:
-                if model_field == 'date_of_birth':
-                    processed_data[model_field] = pd.to_datetime(str(value)).date()
-                elif model_field in ['height', 'weight']:
-                    if str(value).strip():
-                        processed_data[model_field] = Decimal(str(value).strip())
-                elif model_field == 'number_of_children':
-                    if str(value).strip():
-                        processed_data[model_field] = int(float(str(value).strip()))
-                elif model_field == 'smoking_status':
-                    smoking_str = str(value).strip().lower()
-                    processed_data[model_field] = smoking_str in ['true', '1', 'yes']
-                elif model_field == 'gender':
-                    processed_data[model_field] = str(value).strip().lower()
-                elif model_field == 'donor_type':
-                    processed_data[model_field] = str(value).strip().lower()
-                elif model_field in ['personality_traits', 'interests_hobbies']:
-                    try:
-                        # Clean up JSON strings
-                        json_str = str(value).strip()
-                        if json_str and json_str not in ['{}', '[]', 'null', 'None']:
-                            # Handle malformed JSON strings from URL encoding
-                            json_str = json_str.replace('"{', '{').replace('}"', '}')
-                            json_str = json_str.replace('"[', '[').replace(']"', ']')
-                            parsed_value = json.loads(json_str)
-                            processed_data[model_field] = parsed_value
-                        else:
-                            processed_data[model_field] = {} if model_field == 'personality_traits' else []
-                    except (json.JSONDecodeError, ValueError) as e:
-                        # If JSON parsing fails, set default values
-                        processed_data[model_field] = {} if model_field == 'personality_traits' else []
-                else:
-                    # For all other string fields
-                    processed_data[model_field] = str(value).strip()
-            except (ValueError, TypeError, pd.errors.OutOfBoundsDatetime) as e:
-                # Skip fields that can't be processed correctly
-                print(f"Warning: Could not process field {model_field} with value {value}: {str(e)}")
-                continue
-    
-    # Set required fields
+        if csv_field in row_data and pd.notna(row_data[csv_field]):
+            value = str(row_data[csv_field]).strip()
+            if value:
+                processed_data[model_field] = value
+
+    # --- Type Conversions and Specific Cleaning ---
+    try:
+        if 'date_of_birth' in processed_data:
+            processed_data['date_of_birth'] = pd.to_datetime(processed_data['date_of_birth']).date()
+        if 'height' in processed_data:
+            processed_data['height'] = Decimal(processed_data['height'])
+        if 'weight' in processed_data:
+            processed_data['weight'] = Decimal(processed_data['weight'])
+        if 'number_of_children' in processed_data:
+            processed_data['number_of_children'] = int(float(processed_data['number_of_children']))
+        if 'smoking_status' in processed_data:
+            processed_data['smoking_status'] = processed_data['smoking_status'].lower() in ['true', '1', 'yes']
+        if 'donor_type' in processed_data:
+            processed_data['donor_type'] = processed_data['donor_type'].lower()
+        if 'gender' in processed_data:
+            processed_data['gender'] = processed_data['gender'].lower()
+        if 'blood_group' in processed_data:
+            processed_data['blood_group'] = processed_data['blood_group'].upper()
+    except (ValueError, TypeError, InvalidOperation, pd.errors.OutOfBoundsDatetime) as e:
+        # This should be caught by validation, but acts as a safeguard.
+        # In a real scenario, you might log this conversion error.
+        pass
+
+    # --- Set Fields Not From File ---
     processed_data['clinic'] = clinic_user
     processed_data['created_by'] = clinic_user
     processed_data['availability_status'] = 'pending'
     processed_data['is_active'] = True
-    
-    # Set default values if not provided
-    if 'country' not in processed_data or not processed_data['country']:
-        processed_data['country'] = 'India'
-    
-    # Ensure donor_type matches the expected type
-    processed_data['donor_type'] = donor_type
     
     return processed_data
 
