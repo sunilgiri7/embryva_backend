@@ -1450,6 +1450,7 @@ def send_meeting_reminders(request, meeting_id):
                 'total_clinics': openapi.Schema(type=openapi.TYPE_INTEGER),
                 'subscriber_users': openapi.Schema(type=openapi.TYPE_INTEGER),
                 'total_subadmins': openapi.Schema(type=openapi.TYPE_INTEGER),
+                'total_parents': openapi.Schema(type=openapi.TYPE_INTEGER)
             }
         )
     )},
@@ -1492,6 +1493,7 @@ def dashboard_stats(request):
         total_active_users=Count('id', filter=Q(is_active=True)),
         total_clinics=Count('id', filter=Q(user_type='clinic')),
         total_subadmins=Count('id', filter=Q(user_type='subadmin')),
+        total_parents=Count('id', filter=Q(user_type='parent')),
     )
     
     # Subscriber users (users with active subscriptions)
@@ -1520,6 +1522,7 @@ def dashboard_stats(request):
             'users': {
                 'total_users': user_stats['total_users'],
                 'total_active_users': user_stats['total_active_users'],
+                'total_parents': user_stats['total_parents'],
                 'total_clinics': user_stats['total_clinics'],
                 'subscriber_users': subscriber_users,
                 'total_subadmins': user_stats['total_subadmins'],
