@@ -297,6 +297,66 @@ def resend_verification_email(request):
             'message': 'User with this email does not exist.'
         }, status=status.HTTP_404_NOT_FOUND)
 
+@swagger_auto_schema(
+    method='post',
+    request_body=ChangePasswordSerializer,
+    responses={
+        200: openapi.Response(
+            description="Password changed successfully",
+            schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'message': openapi.Schema(type=openapi.TYPE_STRING),
+                    'success': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                }
+            )
+        ),
+        400: openapi.Response(
+            description="Validation errors",
+            schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'old_password': openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Schema(type=openapi.TYPE_STRING)
+                    ),
+                    'new_password': openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Schema(type=openapi.TYPE_STRING)
+                    ),
+                    'confirm_new_password': openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Schema(type=openapi.TYPE_STRING)
+                    ),
+                    'success': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                }
+            )
+        )
+    }
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    """
+    Change password for logged-in user (requires authentication)
+    """
+    serializer = ChangePasswordSerializer(data=request.data, context={'request': request})
+
+    if serializer.is_valid():
+        user = request.user
+        user.set_password(serializer.validated_data['new_password'])
+        user.save()
+
+        return Response({
+            'message': 'Password changed successfully.',
+            'success': True
+        }, status=status.HTTP_200_OK)
+
+    return Response({
+        **serializer.errors,
+        'success': False
+    }, status=status.HTTP_400_BAD_REQUEST)
+
 # --------------------- CREATE  SUB‑ADMIN ------------------------------
 @swagger_auto_schema(
     method='post',

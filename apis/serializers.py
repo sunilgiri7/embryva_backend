@@ -4,7 +4,7 @@ from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from rest_framework.authentication import _
-
+from django.contrib.auth import password_validation
 from apis.utils import send_verification_email
 from .models import Appointment, Donor, DonorDocument, DonorImage, Meeting, PasswordResetOTP, SubscriptionPlan, User, UserSubscription
 from django.conf import settings
@@ -380,6 +380,34 @@ class ResetPasswordSerializer(serializers.Serializer):
         self.user.save()
         PasswordResetOTP.objects.filter(user=self.user).update(is_used=True)
         return self.user
+    
+class ChangePasswordSerializer(serializers.Serializer):
+    old_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True)
+    confirm_new_password = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        user = self.context['request'].user
+        old_password = attrs.get('old_password')
+        new_password = attrs.get('new_password')
+        confirm_new_password = attrs.get('confirm_new_password')
+
+        # Check old password
+        if not user.check_password(old_password):
+            raise serializers.ValidationError({"old_password": "Old password is incorrect."})
+
+        # Check new and confirm match
+        if new_password != confirm_new_password:
+            raise serializers.ValidationError({"confirm_new_password": "New passwords do not match."})
+
+        # Check if new password is same as old
+        if old_password == new_password:
+            raise serializers.ValidationError({"new_password": "New password cannot be same as old password."})
+
+        # Django's built-in password validators
+        # password_validation.validate_password(new_password, user)
+
+        return attrs
     
 class UserUpdateSerializer(serializers.ModelSerializer):
     class Meta:
