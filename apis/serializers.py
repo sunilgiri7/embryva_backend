@@ -1,4 +1,5 @@
 import os
+import re
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
@@ -37,6 +38,15 @@ class ParentSignupSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("User with this email already exists")
             
         return attrs
+    
+    def validate_phone_number(self, value):
+        if not re.fullmatch(r'\+?\d{10,15}', value):
+            raise serializers.ValidationError("Enter a valid phone number (10–15 digits, optional leading '+').")
+
+        if User.objects.filter(phone_number=value).exists():
+            raise serializers.ValidationError("User with this phone number already exists.")
+        
+        return value
     
     def create(self, validated_data):
         validated_data.pop('password_confirm')
@@ -141,13 +151,37 @@ class ClinicCreateSerializer(serializers.ModelSerializer):
 class SubAdminCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
     password_confirm = serializers.CharField(write_only=True)
+    permissions = serializers.JSONField(required=False, default=dict)
     
     class Meta:
         model = User
         fields = [
             'first_name', 'last_name', 'email', 'phone_number',
-            'password', 'password_confirm'
+            'password', 'password_confirm', 'permissions'
         ]
+    
+    def validate_permissions(self, value):
+        """Validate permissions format"""
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Permissions must be a dictionary")
+        
+        valid_sections = User.PERMISSION_SECTIONS
+        invalid_sections = set(value.keys()) - set(valid_sections)
+        
+        if invalid_sections:
+            raise serializers.ValidationError(
+                f"Invalid permission sections: {list(invalid_sections)}. "
+                f"Valid sections are: {valid_sections}"
+            )
+        
+        # Ensure all values are boolean
+        for section, permission in value.items():
+            if not isinstance(permission, bool):
+                raise serializers.ValidationError(
+                    f"Permission for '{section}' must be a boolean value"
+                )
+        
+        return value
         
     def validate(self, attrs):
         if attrs['password'] != attrs['password_confirm']:
@@ -162,11 +196,13 @@ class SubAdminCreateSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop('password_confirm')
         password = validated_data.pop('password')
+        permissions = validated_data.pop('permissions', {})
         
         user = User.objects.create(
             user_type='subadmin',
             username=validated_data['email'],
             created_by=self.context['request'].user,
+            permissions=permissions,
             **validated_data
         )
         user.set_password(password)
@@ -174,27 +210,35 @@ class SubAdminCreateSerializer(serializers.ModelSerializer):
         return user
 
 class UserSerializer(serializers.ModelSerializer):
-    is_admin     = serializers.SerializerMethodField()
-    is_subadmin  = serializers.SerializerMethodField()
-    is_clinic    = serializers.SerializerMethodField()
-    is_parent    = serializers.SerializerMethodField()
+    is_admin = serializers.SerializerMethodField()
+    is_subadmin = serializers.SerializerMethodField()
+    is_clinic = serializers.SerializerMethodField()
+    is_parent = serializers.SerializerMethodField()
     profile_image_url = serializers.SerializerMethodField()
+    permissions = serializers.SerializerMethodField()
 
     class Meta:
-        model  = User
+        model = User
         fields = [
             "id", "first_name", "last_name", "email", "phone_number",
             "user_type", "is_verified", "created_at", "profile_image",
             "relationship_to_child", "specialization", "years_of_experience",
             "is_admin", "is_subadmin", "is_clinic", "is_parent", "profile_image_url",
+            "permissions"
         ]
         read_only_fields = ["id", "user_type", "created_at"]
 
-    # helper getters
-    def get_is_admin(self, obj):    return obj.is_admin
-    def get_is_subadmin(self, obj): return obj.is_subadmin
-    def get_is_clinic(self, obj):   return obj.is_clinic
-    def get_is_parent(self, obj):   return obj.is_parent
+    def get_is_admin(self, obj):
+        return obj.is_admin
+    
+    def get_is_subadmin(self, obj):
+        return obj.is_subadmin
+    
+    def get_is_clinic(self, obj):
+        return obj.is_clinic
+    
+    def get_is_parent(self, obj):
+        return obj.is_parent
     
     def get_profile_image_url(self, obj):
         if obj.profile_image:
@@ -203,6 +247,10 @@ class UserSerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.profile_image.url)
             return obj.profile_image.url
         return None
+    
+    def get_permissions(self, obj):
+        """Return permissions for admin/subadmin users"""
+        return obj.get_permissions()
     
 class AdminProfileUpdateSerializer(serializers.ModelSerializer):
     profile_image = serializers.ImageField(required=False)
@@ -255,25 +303,21 @@ class ForgotPasswordEmailSerializer(serializers.Serializer):
         self.user = user
         return value
 
-    def save(self) -> PasswordResetOTP:
+    def save(self):
         otp_obj = PasswordResetOTP.create_for_user(self.user)
+        
+        # Generate the signed token
+        token = otp_obj.signed_token()
 
-        reset_link = (
-            f"{settings.FRONTEND_PASSWORD_RESET_URL}"
-            f"?token={otp_obj.signed_token()}"
-        )
-
+        # Send email with OTP only (no token link)
         send_mail(
             "Password Reset OTP – Embryva",
-            (
-                f"Your OTP is {otp_obj.otp}. It expires in 10 minutes.\n\n"
-                f"Click the link to verify: {reset_link}"
-            ),
+            f"Your OTP is {otp_obj.otp}. It expires in 10 minutes.",
             getattr(settings, "DEFAULT_FROM_EMAIL", "noreply@embryva.com"),
             [self.user.email],
         )
-        return otp_obj
-
+        
+        return otp_obj, token
 
 # --------------------------- VERIFY OTP ------------------------------
 class VerifyOTPSerializer(serializers.Serializer):

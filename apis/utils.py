@@ -2,6 +2,10 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.template.loader import render_to_string
 from django.utils.html import strip_tags
+from rest_framework.response import Response
+from rest_framework import status, generics, permissions
+from rest_framework.pagination import PageNumberPagination
+from functools import wraps
 
 def send_verification_email(user, request=None):
     # Get domain - you can customize this based on your setup
@@ -81,3 +85,40 @@ def send_verification_email(user, request=None):
     except Exception as e:
         print(f"Failed to send verification email: {e}")
         return False
+    
+def require_permission(section):
+    """Decorator to check if user has permission for a specific section"""
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapper(request, *args, **kwargs):
+            if not request.user.is_authenticated:
+                return Response(
+                    {"detail": "Authentication required."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            
+            if not request.user.has_permission(section):
+                return Response(
+                    {"detail": f"You don't have permission to access {section} section."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            
+            return view_func(request, *args, **kwargs)
+        return wrapper
+    return decorator
+
+class CustomPageNumberPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+    
+    def get_paginated_response(self, data):
+        return Response({
+            'count': self.page.paginator.count,
+            'total_pages': self.page.paginator.num_pages,
+            'current_page': self.page.number,
+            'page_size': self.page.paginator.per_page,
+            'next': self.page.next_page_number() if self.page.has_next() else None,
+            'previous': self.page.previous_page_number() if self.page.has_previous() else None,
+            'results': data
+        })
