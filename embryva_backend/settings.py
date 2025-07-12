@@ -17,7 +17,7 @@ FRONTEND_PASSWORD_RESET_URL = 'http://embryva-backend.onrender.com'
 CORS_ALLOWED_ORIGINS = [
     "http://embryva-backend.onrender.com",  # Add your frontend URL
     "http://127.0.0.1:3000",
-    "http://127.0.0.1:3000"
+    "http://127.0.0.1:3000",
     "http://192.168.183.152:3000"
 ]
 
