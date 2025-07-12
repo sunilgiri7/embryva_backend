@@ -3088,8 +3088,8 @@ def find_matching_donors(request):
         # 4. Sort and Filter Results
         match_results.sort(key=lambda x: x.match_score, reverse=True)
         
-        # FIX: Filter for matches >= 75% and limit the final result set to prevent overload
-        high_quality_matches = [m for m in match_results if m.match_score >= 0.75]
+        # FIX: Filter for matches >= 50% and limit the final result set to prevent overload
+        high_quality_matches = [m for m in match_results if m.match_score >= 0.50]
         top_matches = high_quality_matches[:50]  # Return up to 50 top matches
         
         # 5. Format Response

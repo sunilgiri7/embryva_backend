@@ -15,11 +15,14 @@ FRONTEND_PASSWORD_RESET_URL = 'http://127.0.0.1:8080'
 
 # CORS Configuration (if you need it for frontend)
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # Add your frontend URL
+    "http://embryva-backend.onrender.com",  # Add your frontend URL
     "http://127.0.0.1:3000",
+    "http://127.0.0.1:3000",
+    "http://192.168.183.152:3000"
 ]
 
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_ALL_ORIGINS = True
 
 INSTALLED_APPS = [
     'jazzmin',
