@@ -762,6 +762,66 @@ def reset_password(request):
     return Response({"message": "Password reset successful"}, status=status.HTTP_200_OK)
 
 @swagger_auto_schema(
+    method='post',
+    request_body=ChangePasswordSerializer,
+    responses={
+        200: openapi.Response(
+            description="Password changed successfully",
+            schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'message': openapi.Schema(type=openapi.TYPE_STRING),
+                    'success': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                }
+            )
+        ),
+        400: openapi.Response(
+            description="Validation errors",
+            schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'old_password': openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Schema(type=openapi.TYPE_STRING)
+                    ),
+                    'new_password': openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Schema(type=openapi.TYPE_STRING)
+                    ),
+                    'confirm_new_password': openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Schema(type=openapi.TYPE_STRING)
+                    ),
+                    'success': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                }
+            )
+        )
+    }
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def change_password(request):
+    """
+    Change password for logged-in user (requires authentication)
+    """
+    serializer = ChangePasswordSerializer(data=request.data, context={'request': request})
+
+    if serializer.is_valid():
+        user = request.user
+        user.set_password(serializer.validated_data['new_password'])
+        user.save()
+
+        return Response({
+            'message': 'Password changed successfully.',
+            'success': True
+        }, status=status.HTTP_200_OK)
+
+    return Response({
+        **serializer.errors,
+        'success': False
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+@swagger_auto_schema(
     method='get',
     manual_parameters=[
         openapi.Parameter('page', openapi.IN_QUERY, description="Page number", type=openapi.TYPE_INTEGER),

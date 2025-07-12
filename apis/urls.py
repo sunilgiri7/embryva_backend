@@ -93,6 +93,7 @@ urlpatterns = [
     path("auth/forgot-password/", views.forgot_password_email, name="forgot-password-email"),
     path("auth/verify-otp/",     views.verify_otp,           name="verify-otp"),
     path("auth/reset-password/", views.reset_password,       name="reset-password"),
+    path('auth/change-password/', views.change_password, name='change-password'),
 
     ###################################### Donor Management ######################################
     path('donors/create/', views.create_donor, name='create_donor'),
