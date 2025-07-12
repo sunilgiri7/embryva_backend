@@ -19,7 +19,6 @@ class User(AbstractUser):
         ('clinic', 'Clinic'),
         ('parent', 'Parent'),
     )
-    user_type = models.CharField(max_length=20, choices=USER_TYPES)
     
     RELATIONSHIP_CHOICES = (
         ('mother', 'Mother'),
@@ -27,6 +26,12 @@ class User(AbstractUser):
         ('guardian', 'Guardian'),
         ('partner', 'Partner'),
     )
+    
+    # Available permission sections
+    PERMISSION_SECTIONS = [
+        'clinic', 'parent', 'subscription', 
+        'appointment', 'transaction', 'profile'
+    ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user_type = models.CharField(max_length=20, choices=USER_TYPES)
@@ -56,7 +61,13 @@ class User(AbstractUser):
     specialization = models.CharField(max_length=255, blank=True, null=True)
     years_of_experience = models.PositiveIntegerField(blank=True, null=True)
     id_proof = models.FileField(upload_to='clinic_documents/', blank=True, null=True)
-    profile_image = models.ImageField(upload_to='media/profile_images/', blank=True, null=True)
+    profile_image = models.ImageField(upload_to='profile_images/', blank=True, null=True)
+    
+    permissions = models.JSONField(
+        default=dict, 
+        blank=True, 
+        help_text="Permissions for subadmin users. Format: {'clinic': True, 'parent': False, ...}"
+    )
 
     @property
     def is_admin(self):
@@ -74,6 +85,37 @@ class User(AbstractUser):
     def is_parent(self):
         return self.user_type == "parent"
     
+    def get_permissions(self):
+        """Get permissions for subadmin users"""
+        if self.user_type == 'admin':
+            # Admin has all permissions
+            return {section: True for section in self.PERMISSION_SECTIONS}
+        elif self.user_type == 'subadmin':
+            # Return stored permissions or default to no permissions
+            return self.permissions if self.permissions else {section: False for section in self.PERMISSION_SECTIONS}
+        else:
+            # Other user types don't have section permissions
+            return {}
+    
+    def set_permissions(self, permissions_dict):
+        """Set permissions for subadmin users"""
+        if self.user_type == 'subadmin':
+            # Only allow valid permission sections
+            valid_permissions = {
+                key: value for key, value in permissions_dict.items() 
+                if key in self.PERMISSION_SECTIONS
+            }
+            self.permissions = valid_permissions
+            self.save(update_fields=['permissions'])
+    
+    def has_permission(self, section):
+        """Check if user has permission for a specific section"""
+        if self.user_type == 'admin':
+            return True
+        elif self.user_type == 'subadmin':
+            return self.permissions.get(section, False)
+        return False
+    
     def is_email_verification_expired(self):
         """Check if email verification token is expired (24 hours)"""
         if not self.email_verification_sent_at:
@@ -89,7 +131,6 @@ class User(AbstractUser):
     def save(self, *args, **kwargs):
         if not self.profile_image and not self.pk:
             self.profile_image = 'media/profile_images/default_avatar.png'
-            # pass
         if not self.username:
             self.username = self.email
         super().save(*args, **kwargs)
@@ -99,11 +140,6 @@ class User(AbstractUser):
     
     class Meta:
         db_table = 'users'
-        
-    def save(self, *args, **kwargs):
-        if not self.username:
-            self.username = self.email
-        super().save(*args, **kwargs)
 
 
 class Meeting(models.Model):

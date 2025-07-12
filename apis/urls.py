@@ -10,6 +10,8 @@ urlpatterns = [
     path('auth/login/', views.user_login, name='user-login'),
     path('auth/token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
     path('auth/profile/', views.user_profile, name='user-profile'),
+    path('admin/profile/update/', views.admin_profile_update, name='admin-profile-update'),
+    path('admin/profile/image/', views.profile_image_upload, name='profile-image-upload'),
     
     # ================ USER LISTS ADMIN ONLY APIS ================
     path('admin/users/subadmins/', views.subadmin_list, name='subadmin-list'),
@@ -20,6 +22,8 @@ urlpatterns = [
     
     # ================ SUBADMIN MANAGEMENT (CRUD) ADMIN ONLY APIS ================
     path('admin/subadmin/create/', views.create_subadmin, name='create-subadmin'),  # existing
+    path('subadmin/<uuid:subadmin_id>/permissions/', views.get_subadmin_permissions, name='get_subadmin_permissions'),
+    path('subadmin/<uuid:subadmin_id>/permissions/update/', views.update_subadmin_permissions, name='update_subadmin_permissions'),
     path('admin/subadmin/<uuid:user_id>/', views.subadmin_detail, name='subadmin-detail'),
     path('admin/subadmin/<uuid:user_id>/update/', views.subadmin_update, name='subadmin-update'),
     path('admin/subadmin/<uuid:user_id>/delete/', views.subadmin_delete, name='subadmin-delete'),

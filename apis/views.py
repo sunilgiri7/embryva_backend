@@ -16,14 +16,14 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 import urllib
 from apis.email_service import EmailService
 from apis.services.embeddingsMatching import DonorMatchingEngine, EmbeddingService, MatchResult
-from apis.utils import generate_unique_donor_id
+from apis.utils import CustomPageNumberPagination, generate_unique_donor_id
 from .models import Appointment, MatchingResult, Meeting, User
 from django.db.models import Q, Count
 from .serializers import *
 from django.shortcuts import get_object_or_404, render
 from django.db.models import Q
 from rest_framework.pagination import PageNumberPagination
-from rest_framework import viewsets, status, permissions
+from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
 import pandas as pd
@@ -304,28 +304,213 @@ def resend_verification_email(request):
         }, status=status.HTTP_404_NOT_FOUND)
 
 # --------------------- CREATE  SUB‑ADMIN ------------------------------
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])         # only need to be logged in
+@swagger_auto_schema(
+    method='post',
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'first_name': openapi.Schema(type=openapi.TYPE_STRING),
+            'last_name': openapi.Schema(type=openapi.TYPE_STRING),
+            'email': openapi.Schema(type=openapi.TYPE_STRING),
+            'phone_number': openapi.Schema(type=openapi.TYPE_STRING),
+            'password': openapi.Schema(type=openapi.TYPE_STRING),
+            'password_confirm': openapi.Schema(type=openapi.TYPE_STRING),
+            'permissions': openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'clinic': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'parent': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'subscription': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'appointment': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'transaction': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'profile': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                },
+                description="Permissions for different sections"
+            )
+        },
+        required=['first_name', 'last_name', 'email', 'password', 'password_confirm']
+    ),
+    responses={
+        201: openapi.Response(
+            description="SubAdmin created successfully",
+            schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'message': openapi.Schema(type=openapi.TYPE_STRING),
+                    'user': openapi.Schema(type=openapi.TYPE_OBJECT),
+                    'success': openapi.Schema(type=openapi.TYPE_BOOLEAN)
+                }
+            )
+        ),
+        400: openapi.Response(description="Bad Request"),
+        403: openapi.Response(description="Permission denied")
+    }
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def create_subadmin(request):
+    """Create a new subadmin with specified permissions"""
     if not request.user.is_admin:
         return Response(
-            {"detail": "Only admins can create sub‑admin accounts."},
+            {"detail": "Only admins can create subadmin accounts."},
             status=status.HTTP_403_FORBIDDEN,
         )
 
     serializer = SubAdminCreateSerializer(
-        data=request.data, context={"request": request}
+        data=request.data, 
+        context={"request": request}
     )
+    
     if serializer.is_valid():
         subadmin = serializer.save()
         return Response(
             {
-                "message": "Sub‑admin created successfully",
-                "subadmin": UserSerializer(subadmin).data,
+                "message": "SubAdmin created successfully.",
+                "user": UserSerializer(subadmin, context={'request': request}).data,
+                "success": True
             },
             status=status.HTTP_201_CREATED,
         )
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    return Response(
+        {
+            "message": "Failed to create subadmin.",
+            "errors": serializer.errors,
+            "success": False
+        }, 
+        status=status.HTTP_400_BAD_REQUEST
+    )
+
+@swagger_auto_schema(
+    method='patch',
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'permissions': openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'clinic': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'parent': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'subscription': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'appointment': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'transaction': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                    'profile': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                },
+                description="Updated permissions for the subadmin"
+            )
+        },
+        required=['permissions']
+    ),
+    responses={
+        200: openapi.Response(description="Permissions updated successfully"),
+        400: openapi.Response(description="Bad Request"),
+        403: openapi.Response(description="Permission denied"),
+        404: openapi.Response(description="SubAdmin not found")
+    }
+)
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def update_subadmin_permissions(request, subadmin_id):
+    """Update permissions for a specific subadmin"""
+    if not request.user.is_admin:
+        return Response(
+            {"detail": "Only admins can update subadmin permissions."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    try:
+        subadmin = User.objects.get(id=subadmin_id, user_type='subadmin')
+    except User.DoesNotExist:
+        return Response(
+            {"detail": "SubAdmin not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    
+    permissions = request.data.get('permissions', {})
+    
+    # Validate permissions
+    if not isinstance(permissions, dict):
+        return Response(
+            {"detail": "Permissions must be a dictionary."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    
+    valid_sections = User.PERMISSION_SECTIONS
+    invalid_sections = set(permissions.keys()) - set(valid_sections)
+    
+    if invalid_sections:
+        return Response(
+            {
+                "detail": f"Invalid permission sections: {list(invalid_sections)}. "
+                         f"Valid sections are: {valid_sections}"
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    
+    # Update permissions
+    subadmin.set_permissions(permissions)
+    
+    return Response(
+        {
+            "message": "Permissions updated successfully.",
+            "user": UserSerializer(subadmin, context={'request': request}).data,
+            "success": True
+        },
+        status=status.HTTP_200_OK,
+    )
+
+
+@swagger_auto_schema(
+    method='get',
+    responses={
+        200: openapi.Response(
+            description="SubAdmin permissions retrieved successfully",
+            schema=openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    'permissions': openapi.Schema(
+                        type=openapi.TYPE_OBJECT,
+                        properties={
+                            'clinic': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                            'parent': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                            'subscription': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                            'appointment': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                            'transaction': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                            'profile': openapi.Schema(type=openapi.TYPE_BOOLEAN),
+                        }
+                    )
+                }
+            )
+        ),
+        403: openapi.Response(description="Permission denied"),
+        404: openapi.Response(description="SubAdmin not found")
+    }
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_subadmin_permissions(request, subadmin_id):
+    """Get permissions for a specific subadmin"""
+    if not request.user.is_admin:
+        return Response(
+            {"detail": "Only admins can view subadmin permissions."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    try:
+        subadmin = User.objects.get(id=subadmin_id, user_type='subadmin')
+    except User.DoesNotExist:
+        return Response(
+            {"detail": "SubAdmin not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    
+    return Response(
+        {
+            "permissions": subadmin.get_permissions(),
+            "success": True
+        },
+        status=status.HTTP_200_OK,
+    )
 
 class UserListView(generics.ListAPIView):
     serializer_class = UserSerializer
@@ -467,7 +652,7 @@ def profile_image_upload(request):
     profile_image = request.FILES['profile_image']
     
     # Validate image file
-    if not profile_image.content_type.startswith('media/'):
+    if not profile_image.content_type.startswith('image/'):
         return Response({
             'success': False,
             'message': 'Invalid image file'
@@ -494,11 +679,12 @@ def profile_image_upload(request):
 def forgot_password_email(request):
     serializer = ForgotPasswordEmailSerializer(data=request.data)
     if serializer.is_valid():
-        otp_instance = serializer.save()
+        otp_instance, token = serializer.save()  # Now returns both OTP instance and token
         
         return Response({
             'message': 'OTP sent to your email successfully',
-            'email': serializer.validated_data['email']
+            'email': serializer.validated_data['email'],
+            'token': token  # Return token in response
         }, status=status.HTTP_200_OK)
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -579,11 +765,25 @@ def reset_password(request):
     method='get',
     manual_parameters=[
         openapi.Parameter('page', openapi.IN_QUERY, description="Page number", type=openapi.TYPE_INTEGER),
-        openapi.Parameter('page_size', openapi.IN_QUERY, description="Number of results per page", type=openapi.TYPE_INTEGER),
+        openapi.Parameter('page_size', openapi.IN_QUERY, description="Number of results per page (default: 10, max: 100)", type=openapi.TYPE_INTEGER),
         openapi.Parameter('search', openapi.IN_QUERY, description="Search by name or email", type=openapi.TYPE_STRING),
     ],
-    responses={200: UserSerializer(many=True)},
-    operation_description="Get list of all subadmins (Admin only)",
+    responses={200: openapi.Response(
+        description="Paginated list of subadmins",
+        schema=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'count': openapi.Schema(type=openapi.TYPE_INTEGER, description="Total number of records"),
+                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER, description="Total number of pages"),
+                'current_page': openapi.Schema(type=openapi.TYPE_INTEGER, description="Current page number"),
+                'page_size': openapi.Schema(type=openapi.TYPE_INTEGER, description="Number of records per page"),
+                'next': openapi.Schema(type=openapi.TYPE_STRING, description="URL for next page"),
+                'previous': openapi.Schema(type=openapi.TYPE_STRING, description="URL for previous page"),
+                'results': openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT))
+            }
+        )
+    )},
+    operation_description="Get paginated list of all subadmins (Admin only)",
     tags=['User Management']
 )
 @api_view(['GET'])
@@ -606,7 +806,7 @@ def subadmin_list(request):
             Q(email__icontains=search)
         )
     
-    paginator = StandardResultsSetPagination()
+    paginator = CustomPageNumberPagination()
     paginated_queryset = paginator.paginate_queryset(queryset, request)
     serializer = UserSerializer(paginated_queryset, many=True)
     
@@ -616,11 +816,25 @@ def subadmin_list(request):
     method='get',
     manual_parameters=[
         openapi.Parameter('page', openapi.IN_QUERY, description="Page number", type=openapi.TYPE_INTEGER),
-        openapi.Parameter('page_size', openapi.IN_QUERY, description="Number of results per page", type=openapi.TYPE_INTEGER),
+        openapi.Parameter('page_size', openapi.IN_QUERY, description="Number of results per page (default: 10, max: 100)", type=openapi.TYPE_INTEGER),
         openapi.Parameter('search', openapi.IN_QUERY, description="Search by name or email", type=openapi.TYPE_STRING),
     ],
-    responses={200: UserSerializer(many=True)},
-    operation_description="Get list of all clinics (Admin/SubAdmin only)",
+    responses={200: openapi.Response(
+        description="Paginated list of clinics",
+        schema=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'count': openapi.Schema(type=openapi.TYPE_INTEGER, description="Total number of records"),
+                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER, description="Total number of pages"),
+                'current_page': openapi.Schema(type=openapi.TYPE_INTEGER, description="Current page number"),
+                'page_size': openapi.Schema(type=openapi.TYPE_INTEGER, description="Number of records per page"),
+                'next': openapi.Schema(type=openapi.TYPE_STRING, description="URL for next page"),
+                'previous': openapi.Schema(type=openapi.TYPE_STRING, description="URL for previous page"),
+                'results': openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT))
+            }
+        )
+    )},
+    operation_description="Get paginated list of all clinics (Admin/SubAdmin only)",
     tags=['User Management']
 )
 @api_view(['GET'])
@@ -629,6 +843,13 @@ def clinic_list(request):
     if not (request.user.is_admin or request.user.is_subadmin):
         return Response(
             {"detail": "Only admins or sub-admins can view clinic list."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    # Check if subadmin has clinic permission
+    if request.user.is_subadmin and not request.user.has_permission('clinic'):
+        return Response(
+            {"detail": "You don't have permission to view clinic list."},
             status=status.HTTP_403_FORBIDDEN,
         )
     
@@ -644,7 +865,7 @@ def clinic_list(request):
             Q(specialization__icontains=search)
         )
     
-    paginator = StandardResultsSetPagination()
+    paginator = CustomPageNumberPagination()
     paginated_queryset = paginator.paginate_queryset(queryset, request)
     serializer = UserSerializer(paginated_queryset, many=True)
     
@@ -654,19 +875,40 @@ def clinic_list(request):
     method='get',
     manual_parameters=[
         openapi.Parameter('page', openapi.IN_QUERY, description="Page number", type=openapi.TYPE_INTEGER),
-        openapi.Parameter('page_size', openapi.IN_QUERY, description="Number of results per page", type=openapi.TYPE_INTEGER),
+        openapi.Parameter('page_size', openapi.IN_QUERY, description="Number of results per page (default: 10, max: 100)", type=openapi.TYPE_INTEGER),
         openapi.Parameter('search', openapi.IN_QUERY, description="Search by name or email", type=openapi.TYPE_STRING),
     ],
-    responses={200: UserSerializer(many=True)},
-    operation_description="Get list of all parents (Admin only - Read only)",
+    responses={200: openapi.Response(
+        description="Paginated list of parents",
+        schema=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'count': openapi.Schema(type=openapi.TYPE_INTEGER, description="Total number of records"),
+                'total_pages': openapi.Schema(type=openapi.TYPE_INTEGER, description="Total number of pages"),
+                'current_page': openapi.Schema(type=openapi.TYPE_INTEGER, description="Current page number"),
+                'page_size': openapi.Schema(type=openapi.TYPE_INTEGER, description="Number of records per page"),
+                'next': openapi.Schema(type=openapi.TYPE_STRING, description="URL for next page"),
+                'previous': openapi.Schema(type=openapi.TYPE_STRING, description="URL for previous page"),
+                'results': openapi.Schema(type=openapi.TYPE_ARRAY, items=openapi.Schema(type=openapi.TYPE_OBJECT))
+            }
+        )
+    )},
+    operation_description="Get paginated list of all parents (Admin/SubAdmin only - Read only)",
     tags=['User Management']
 )
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def parent_list(request):
-    if not request.user.is_admin:
+    if not (request.user.is_admin or request.user.is_subadmin):
         return Response(
-            {"detail": "Only admins can view parent list."},
+            {"detail": "Only admins or sub-admins can view parent list."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    # Check if subadmin has parent permission
+    if request.user.is_subadmin and not request.user.has_permission('parent'):
+        return Response(
+            {"detail": "You don't have permission to view parent list."},
             status=status.HTTP_403_FORBIDDEN,
         )
     
@@ -682,7 +924,7 @@ def parent_list(request):
             Q(relationship_to_child__icontains=search)
         )
     
-    paginator = StandardResultsSetPagination()
+    paginator = CustomPageNumberPagination()
     paginated_queryset = paginator.paginate_queryset(queryset, request)
     serializer = UserSerializer(paginated_queryset, many=True)
     
@@ -875,7 +1117,7 @@ def clinic_delete(request, user_id):
 @permission_classes([IsAuthenticated])
 def parent_detail(request, user_id):
     # ▸ NEW: permission check for parent’s own record
-    if not (request.user.is_admin or (request.user.is_parent and str(request.user.id) == str(user_id))):
+    if not (request.user.is_admin or request.user.is_subadmin or (request.user.is_parent and str(request.user.id) == str(user_id))):
         return Response(
             {"detail": "You do not have permission to view these details."},
             status=status.HTTP_403_FORBIDDEN,
@@ -907,7 +1149,7 @@ def parent_detail(request, user_id):
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
 def parent_update(request, user_id):
-    if not (request.user.is_admin or (request.user.is_parent and str(request.user.id) == str(user_id))):
+    if not (request.user.is_admin or request.user.is_subadmin or (request.user.is_parent and str(request.user.id) == str(user_id))):
         return Response(
             {"detail": "You do not have permission to update these details."},
             status=status.HTTP_403_FORBIDDEN,
@@ -940,9 +1182,9 @@ def parent_update(request, user_id):
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def parent_delete(request, user_id):
-    if not request.user.is_admin:
+    if not (request.user.is_admin or request.user.is_subadmin):
         return Response(
-            {"detail": "Only admins can delete parent."},
+            {"detail": "Only admins or sub-admins can view clinic list."},
             status=status.HTTP_403_FORBIDDEN,
         )
     
@@ -1129,9 +1371,9 @@ def appointment_delete(request, appointment_id):
     """
     Admin only: Delete appointment
     """
-    if not request.user.is_admin:
+    if not (request.user.is_admin or request.user.is_subadmin):
         return Response(
-            {"detail": "Only admins can delete appointments."},
+            {"detail": "Only admins or sub-admins can view clinic list."},
             status=status.HTTP_403_FORBIDDEN,
         )
     
