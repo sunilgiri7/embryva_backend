@@ -292,7 +292,7 @@ class ForgotPasswordEmailSerializer(serializers.Serializer):
         try:
             user = User.objects.get(
                 email=value.strip().lower(),      # normalise
-                user_type__in=["parent", "clinic"]
+                user_type__in=["parent", "clinic", "admin", "subadmin"]
             )
         except User.DoesNotExist:
             raise serializers.ValidationError("No account found with this email address")
