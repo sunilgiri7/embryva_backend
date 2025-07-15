@@ -91,7 +91,6 @@ urlpatterns = [
     path('admin/meetings/<uuid:meeting_id>/send-reminders/', views.send_meeting_reminders, name='send_meeting_reminders'),
     
     # ====================== DASHBOARD STATISTICS ======================
-    # Dashboard statistics for appointment management module
     path('admin/dashboard/stats/', views.dashboard_stats, name='dashboard_stats'),
 
     # ================ AUTHENTICATION AND PASSWORD MANAGEMENT ================
@@ -101,27 +100,17 @@ urlpatterns = [
     path('auth/change-password/', views.change_password, name='change-password'),
 
     ###################################### Donor Management ######################################
-    path('donors/create/', views.create_donor, name='create_donor'),
-    path('donors/list/', views.donor_list, name='donor_list'),
-    path('donors/<uuid:donor_id>/', views.donor_detail, name='donor_detail'),
-    path('donors/<uuid:donor_id>/update/', views.donor_update, name='donor_update'),
-    path('donors/<uuid:donor_id>/delete/', views.donor_delete, name='donor_delete'),
-    
     # Import donors from File
     path('donors/template/download/', views.download_donor_template, name='download_donor_template'),
     path('donors/import/preview/', views.preview_donor_import, name='preview_donor_import'),
     path('donors/import/', views.import_donors, name='import_donors'),
-    
-    # Statistics
+    path('donors/', views.view_donors, name='view_donors'),
+    path('donors/<str:donor_id>/detail/', views.get_donor_detail, name='get_donor_detail'),
+    path('donors/<str:donor_id>/delete/', views.delete_donor, name='delete_donor'),
+    path('donors/bulk-delete/', views.bulk_delete_donors, name='bulk_delete_donors'),
+    path('donors/<str:donor_id>/update/', views.update_donor, name='update_donor'),
+    path('donors/<str:donor_id>/partial-update/', views.partial_update_donor, name='partial_update_donor'),
     path('donors/statistics/', views.donor_statistics, name='donor_statistics'),
-    
-    # Image management
-    path('donors/<uuid:donor_id>/images/add/', views.add_donor_image, name='add_donor_image'),
-    path('donors/<uuid:donor_id>/images/<uuid:image_id>/delete/', views.delete_donor_image, name='delete_donor_image'),
-    
-    # Document management
-    path('donors/<uuid:donor_id>/documents/add/', views.add_donor_document, name='add_donor_document'),
-    path('donors/<uuid:donor_id>/documents/<uuid:document_id>/delete/', views.delete_donor_document, name='delete_donor_document'),
 
     # Fertility Profile URLs
     path('fertility-profile/create/', views.create_fertility_profile, name='create_fertility_profile'),

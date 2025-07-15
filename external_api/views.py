@@ -9,7 +9,7 @@ from apis.serializers import DonorImportSerializer
 from external_api.models import APIKey
 from .serializers import APIKeyCreateSerializer, APIKeySerializer, APIKeyToggleSerializer, ExternalMatchSerializer
 from .permissions import HasAPIKey
-from apis.views import import_donors, find_matching_donors
+# from apis.views import import_donors, find_matching_donors
 import logging
 from django.contrib.auth.hashers import make_password
 from apis.utils import process_donor_import_logic, execute_match_search_logic
@@ -47,21 +47,21 @@ class GenerateAPIKeyView(generics.GenericAPIView):
         display_serializer = APIKeySerializer(api_key)
         return Response(display_serializer.data, status=status.HTTP_201_CREATED)
 
-class ExternalDonorImportView(generics.GenericAPIView):
-    permission_classes = [HasAPIKey]
+# class ExternalDonorImportView(generics.GenericAPIView):
+#     permission_classes = [HasAPIKey]
 
-    def post(self, request, *args, **kwargs):
-        # FIX: Pass the underlying Django HttpRequest (request._request)
-        return import_donors(request._request)
+#     def post(self, request, *args, **kwargs):
+#         # FIX: Pass the underlying Django HttpRequest (request._request)
+#         return import_donors(request._request)
 
 
-class ExternalMatchView(generics.GenericAPIView):
-    serializer_class = ExternalMatchSerializer
-    permission_classes = [HasAPIKey]
+# class ExternalMatchView(generics.GenericAPIView):
+#     serializer_class = ExternalMatchSerializer
+#     permission_classes = [HasAPIKey]
 
-    def post(self, request, *args, **kwargs):
-        # FIX: Pass the underlying Django HttpRequest (request._request)
-        return find_matching_donors(request._request)
+#     def post(self, request, *args, **kwargs):
+#         # FIX: Pass the underlying Django HttpRequest (request._request)
+#         return find_matching_donors(request._request)
     
 class ToggleAPIKeyStatusView(generics.UpdateAPIView):
     queryset = APIKey.objects.all()

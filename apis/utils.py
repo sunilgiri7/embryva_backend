@@ -512,3 +512,101 @@ def clean_phone_number(phone_number):
         cleaned = cleaned[:max_length]
     
     return cleaned
+
+def prepare_donor_data_for_embedding(donor_instance):
+    """
+    Prepare comprehensive donor data for embedding generation.
+    This ensures all relevant fields are included for better matching.
+    """
+    return {
+        'donor_id': donor_instance.donor_id,
+        'gender': donor_instance.gender,
+        'donor_type': donor_instance.donor_type,
+        'age': donor_instance.age,
+        'height': float(donor_instance.height) if donor_instance.height else None,
+        'weight': float(donor_instance.weight) if donor_instance.weight else None,
+        'eye_color': donor_instance.eye_color,
+        'hair_color': donor_instance.hair_color,
+        'skin_tone': donor_instance.skin_tone,
+        'ethnicity': donor_instance.ethnicity,
+        'education_level': donor_instance.education_level,
+        'occupation': donor_instance.occupation,
+        'blood_group': donor_instance.blood_group,
+        'smoking_status': donor_instance.smoking_status,
+        'alcohol_consumption': donor_instance.alcohol_consumption,
+        'exercise_frequency': donor_instance.exercise_frequency,
+        'religion': donor_instance.religion,
+        'marital_status': donor_instance.marital_status,
+        'location': donor_instance.location,
+        'city': donor_instance.city,
+        'state': donor_instance.state,
+        'country': donor_instance.country,
+        'date_of_birth': donor_instance.date_of_birth,
+        'personality_traits': donor_instance.personality_traits or [],
+        'interests_hobbies': donor_instance.interests_hobbies or [],
+        'genetic_conditions': donor_instance.genetic_conditions,
+        'medical_history': donor_instance.medical_history,
+        'family_medical_history': donor_instance.family_medical_history,
+        'allergies': donor_instance.allergies,
+        'medications': donor_instance.medications,
+        'availability_status': donor_instance.availability_status,
+        'number_of_children': donor_instance.number_of_children,
+    }
+
+
+def prepare_metadata_for_pinecone(donor_instance):
+    """
+    Prepare metadata for Pinecone storage.
+    Filters out null values to prevent Pinecone errors.
+    """
+    metadata = {
+        'donor_id': donor_instance.donor_id,
+        'donor_type': donor_instance.donor_type,
+        'gender': donor_instance.gender,
+        'age': donor_instance.age,
+        'blood_group': donor_instance.blood_group,
+        'availability_status': donor_instance.availability_status,
+        'location': donor_instance.location,
+        'city': donor_instance.city,
+        'state': donor_instance.state,
+        'country': donor_instance.country,
+        'created_at': donor_instance.created_at.isoformat(),
+        'updated_at': donor_instance.updated_at.isoformat(),
+    }
+    
+    # Add optional fields only if they have values
+    optional_fields = {
+        'education_level': donor_instance.education_level,
+        'ethnicity': donor_instance.ethnicity,
+        'occupation': donor_instance.occupation,
+        'marital_status': donor_instance.marital_status,
+        'religion': donor_instance.religion,
+        'eye_color': donor_instance.eye_color,
+        'hair_color': donor_instance.hair_color,
+        'skin_tone': donor_instance.skin_tone,
+        'smoking_status': str(donor_instance.smoking_status),
+        'alcohol_consumption': donor_instance.alcohol_consumption,
+        'exercise_frequency': donor_instance.exercise_frequency,
+    }
+    
+    # Add numeric fields
+    if donor_instance.height:
+        metadata['height'] = float(donor_instance.height)
+    if donor_instance.weight:
+        metadata['weight'] = float(donor_instance.weight)
+    if donor_instance.number_of_children is not None:
+        metadata['number_of_children'] = donor_instance.number_of_children
+    
+    # Add list fields (convert to string for Pinecone)
+    if donor_instance.personality_traits:
+        metadata['personality_traits'] = str(donor_instance.personality_traits)
+    if donor_instance.interests_hobbies:
+        metadata['interests_hobbies'] = str(donor_instance.interests_hobbies)
+    
+    # Filter out None values and empty strings
+    filtered_metadata = {}
+    for key, value in {**metadata, **optional_fields}.items():
+        if value is not None and value != '' and value != 'None':
+            filtered_metadata[key] = value
+    
+    return filtered_metadata

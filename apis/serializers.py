@@ -1,3 +1,4 @@
+from datetime import date
 import os
 import re
 from rest_framework import serializers
@@ -780,60 +781,6 @@ class DonorDocumentSerializer(serializers.ModelSerializer):
         fields = ['id', 'document_type', 'document', 'document_name', 'description', 'uploaded_at']
 
 
-class DonorCreateSerializer(serializers.ModelSerializer):
-    """Serializer for creating donors (Clinic only)"""
-    images = DonorImageSerializer(many=True, required=False)
-    documents_files = DonorDocumentSerializer(many=True, required=False)
-    
-    class Meta:
-        model = Donor
-        fields = [
-            'title', 'first_name', 'last_name', 'gender', 'date_of_birth',
-            'phone_number', 'email', 'location', 'address', 'city', 'state', 
-            'country', 'postal_code', 'donor_type', 'blood_group', 'height', 
-            'weight', 'eye_color', 'hair_color', 'skin_tone', 'education_level',
-            'occupation', 'marital_status', 'religion', 'ethnicity',
-            'medical_history', 'genetic_conditions', 'medications', 'allergies',
-            'smoking_status', 'alcohol_consumption', 'exercise_frequency',
-            'number_of_children', 'family_medical_history', 'profile_image',
-            'documents', 'personality_traits', 'interests_hobbies', 'notes',
-            'images', 'documents_files'
-        ]
-    
-    def validate_date_of_birth(self, value):
-        """Ensure donor is at least 18 years old"""
-        from datetime import date
-        today = date.today()
-        age = today.year - value.year - ((today.month, today.day) < (value.month, value.day))
-        if age < 18:
-            raise serializers.ValidationError("Donor must be at least 18 years old")
-        if age > 65:
-            raise serializers.ValidationError("Donor age cannot exceed 65 years")
-        return value
-    
-    def create(self, validated_data):
-        images_data = validated_data.pop('images', [])
-        documents_data = validated_data.pop('documents_files', [])
-        
-        # Set clinic from authenticated user
-        request = self.context.get('request')
-        if request and request.user.is_authenticated and request.user.is_clinic:
-            validated_data['clinic'] = request.user
-            validated_data['created_by'] = request.user
-        
-        donor = Donor.objects.create(**validated_data)
-        
-        # Create images
-        for image_data in images_data:
-            DonorImage.objects.create(donor=donor, **image_data)
-        
-        # Create documents
-        for document_data in documents_data:
-            DonorDocument.objects.create(donor=donor, **document_data)
-        
-        return donor
-
-
 class DonorDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer for donor with all relationships"""
     clinic_name = serializers.CharField(source='clinic.get_full_name', read_only=True)
@@ -941,6 +888,175 @@ class DonorImportPreviewSerializer(serializers.Serializer):
     file = serializers.FileField()
     rows_limit = serializers.IntegerField(default=10, min_value=1, max_value=100)
 
+class DonorUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating donor information with all fields"""
+    
+    # Custom fields for better validation
+    personality_traits = serializers.ListField(
+        child=serializers.CharField(max_length=100),
+        required=False,
+        allow_empty=True,
+        help_text="List of personality traits"
+    )
+    
+    interests_hobbies = serializers.ListField(
+        child=serializers.CharField(max_length=100),
+        required=False,
+        allow_empty=True,
+        help_text="List of interests and hobbies"
+    )
+    
+    class Meta:
+        model = Donor
+        fields = [
+            'title', 'first_name', 'last_name', 'gender', 'date_of_birth',
+            'phone_number', 'email', 'location', 'address', 'city', 'state', 
+            'country', 'postal_code',
+            'donor_type', 'availability_status', 'blood_group',
+            'height', 'weight', 'eye_color', 'hair_color', 'skin_tone',
+            'education_level', 'occupation', 'marital_status', 'religion', 'ethnicity',
+            'medical_history', 'genetic_conditions', 'medications', 'allergies',
+            'smoking_status', 'alcohol_consumption', 'exercise_frequency',
+            'number_of_children', 'family_medical_history',
+            'profile_image', 'documents',
+            'personality_traits', 'interests_hobbies',
+            'notes'
+        ]
+        
+        read_only_fields = [
+            'id', 'donor_id', 'clinic', 'created_by', 'created_at', 
+            'updated_at', 'verified_at', 'ai_matching_score', 'is_active'
+        ]
+        
+        extra_kwargs = {
+            'title': {'required': False},
+            'first_name': {'required': False},
+            'last_name': {'required': False},
+            'gender': {'required': False},
+            'date_of_birth': {'required': False},
+            'phone_number': {'required': False},
+            'location': {'required': False},
+            'city': {'required': False},
+            'state': {'required': False},
+            'donor_type': {'required': False},
+            'blood_group': {'required': False},
+            'height': {'required': False},
+            'weight': {'required': False},
+            'profile_image': {'required': False, 'allow_null': True},
+            'documents': {'required': False, 'allow_null': True},
+            'email': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'address': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'postal_code': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'eye_color': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'hair_color': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'skin_tone': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'education_level': {'required': False, 'allow_null': True},
+            'occupation': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'marital_status': {'required': False, 'allow_null': True},
+            'religion': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'ethnicity': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'medical_history': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'genetic_conditions': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'medications': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'allergies': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'alcohol_consumption': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'exercise_frequency': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'family_medical_history': {'required': False, 'allow_null': True, 'allow_blank': True},
+            'notes': {'required': False, 'allow_null': True, 'allow_blank': True},
+        }
+    
+    def validate_email(self, value):
+        """Validate email format and uniqueness"""
+        if value:
+            # Check if email already exists for other donors in the same clinic
+            clinic = self.context['request'].user
+            existing_donor = Donor.objects.filter(
+                email=value, 
+                clinic=clinic, 
+                is_active=True
+            ).exclude(id=self.instance.id if self.instance else None)
+            
+            if existing_donor.exists():
+                raise serializers.ValidationError("A donor with this email already exists in your clinic")
+        return value
+    
+    def validate_date_of_birth(self, value):
+        """Validate date of birth and age constraints"""
+        if value:
+            today = date.today()
+            age = today.year - value.year - ((today.month, today.day) < (value.month, value.day))
+            
+            if age < 18:
+                raise serializers.ValidationError("Donor must be at least 18 years old")
+            if age > 80:
+                raise serializers.ValidationError("Donor must be under 80 years old")
+                
+            # Check if date is not in the future
+            if value > today:
+                raise serializers.ValidationError("Date of birth cannot be in the future")
+        return value
+    
+    def validate_height(self, value):
+        """Validate height range"""
+        if value is not None:
+            if value < 100 or value > 250:
+                raise serializers.ValidationError("Height must be between 100 and 250 cm")
+        return value
+    
+    def validate_weight(self, value):
+        """Validate weight range"""
+        if value is not None:
+            if value < 30 or value > 200:
+                raise serializers.ValidationError("Weight must be between 30 and 200 kg")
+        return value
+    
+    def validate(self, attrs):
+        donor_type = attrs.get('donor_type', self.instance.donor_type if self.instance else None)
+        gender = attrs.get('gender', self.instance.gender if self.instance else None)
+        
+        if donor_type and gender:
+            if donor_type == 'sperm' and gender != 'male':
+                raise serializers.ValidationError("Sperm donors must be male")
+            elif donor_type == 'egg' and gender != 'female':
+                raise serializers.ValidationError("Egg donors must be female")
+        
+        # Validate height and weight consistency
+        height = attrs.get('height', self.instance.height if self.instance else None)
+        weight = attrs.get('weight', self.instance.weight if self.instance else None)
+        
+        if height and weight:
+            # Calculate BMI for basic validation
+            bmi = float(weight) / ((float(height) / 100) ** 2)
+            if bmi < 15 or bmi > 45:
+                raise serializers.ValidationError("Height and weight combination seems unusual. Please verify.")
+        
+        return attrs
+    
+    def update(self, instance, validated_data):
+        """Update donor instance with embedding update tracking"""
+        # Track if important fields are updated for embedding update
+        embedding_important_fields = [
+            'first_name', 'last_name', 'donor_type', 'gender', 'date_of_birth',
+            'location', 'city', 'state', 'country', 'blood_group', 'height', 'weight',
+            'eye_color', 'hair_color', 'skin_tone', 'education_level', 'occupation',
+            'marital_status', 'religion', 'ethnicity', 'medical_history', 'genetic_conditions',
+            'smoking_status', 'alcohol_consumption', 'exercise_frequency', 'personality_traits',
+            'interests_hobbies', 'availability_status'
+        ]
+        
+        needs_embedding_update = any(field in validated_data for field in embedding_important_fields)
+        
+        # Update the instance
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        
+        # Set flag for embedding update
+        if needs_embedding_update:
+            instance.needs_embedding_update = True
+        
+        instance.save()
+        return instance
+
 #############################AI MATCHING SERIALIZERS####################################
 class FertilityProfileSerializer(serializers.ModelSerializer):
     """Serializer for creating fertility profiles"""
@@ -965,3 +1081,44 @@ class FertilityProfileSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         validated_data['parent'] = request.user
         return super().create(validated_data)
+
+class DonorListSerializer(serializers.ModelSerializer):
+    """Serializer for listing donors with basic information"""
+    age = serializers.ReadOnlyField()
+    full_name = serializers.ReadOnlyField()
+    
+    class Meta:
+        model = Donor
+        fields = [
+            'id', 'donor_id', 'full_name', 'age', 'gender', 'donor_type',
+            'availability_status', 'blood_group', 'location', 'education_level',
+            'ethnicity', 'height', 'weight', 'created_at', 'updated_at'
+        ]
+
+class DonorDetailSerializer(serializers.ModelSerializer):
+    """Serializer for detailed donor information"""
+    age = serializers.ReadOnlyField()
+    full_name = serializers.ReadOnlyField()
+    
+    class Meta:
+        model = Donor
+        exclude = ['created_by']
+
+class DonorBulkDeleteSerializer(serializers.Serializer):
+    donor_ids = serializers.ListField(
+        child=serializers.CharField(max_length=50),
+        min_length=1,
+        help_text="List of donor IDs to delete"
+    )
+    
+    def validate_donor_ids(self, value):
+        """Validate that all donor IDs exist and belong to the requesting clinic"""
+        if not value:
+            raise serializers.ValidationError("At least one donor ID is required")
+        
+        # Remove duplicates
+        unique_ids = list(set(value))
+        if len(unique_ids) != len(value):
+            raise serializers.ValidationError("Duplicate donor IDs found")
+        
+        return unique_ids

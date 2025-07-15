@@ -16,6 +16,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 import urllib
 from apis.email_service import EmailService
 from apis.services.embeddingsMatching import DonorMatchingEngine, EmbeddingService, MatchResult
+from apis.services.signals import generate_and_store_embedding
 from apis.services.stripe_service import create_stripe_customer
 from apis.utils import CustomPageNumberPagination, generate_unique_donor_id, process_donor_data, validate_donor_row
 from .models import Appointment, MatchingResult, Meeting, User
@@ -33,8 +34,10 @@ from django.db import transaction
 from django.http import HttpResponse
 from django.db import models
 import stripe
+from django.core.paginator import Paginator
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view, permission_classes, parser_classes
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -2168,274 +2171,6 @@ class UserSubscriptionViewSet(viewsets.ModelViewSet):
                 'billing_cycle_statistics': billing_cycle_stats
             }
         })
-    
-# ====================== DONOR MANAGEMENT ======================
-
-@swagger_auto_schema(
-    method='post',
-    request_body=DonorCreateSerializer,
-    responses={
-        201: openapi.Response(
-            description="Donor created successfully",
-            schema=DonorDetailSerializer
-        ),
-        400: "Bad Request",
-        403: "Forbidden - Clinic access only"
-    },
-    operation_description="Create new donor (Clinic only)",
-    tags=['Donor Management']
-)
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def create_donor(request):
-    """Create new donor - Clinic only"""
-    if not request.user.is_clinic:
-        return Response(
-            {"detail": "Only clinics can create donors."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-    
-    serializer = DonorCreateSerializer(data=request.data, context={'request': request})
-    if serializer.is_valid():
-        donor = serializer.save()
-        return Response({
-            'success': True,
-            'message': 'Donor created successfully',
-            'donor': DonorDetailSerializer(donor).data
-        }, status=status.HTTP_201_CREATED)
-    
-    return Response({
-        'success': False,
-        'message': 'Please check the form data',
-        'errors': serializer.errors
-    }, status=status.HTTP_400_BAD_REQUEST)
-
-
-@swagger_auto_schema(
-    method='get',
-    manual_parameters=[
-        openapi.Parameter('page', openapi.IN_QUERY, description="Page number", type=openapi.TYPE_INTEGER),
-        openapi.Parameter('page_size', openapi.IN_QUERY, description="Results per page", type=openapi.TYPE_INTEGER),
-        openapi.Parameter('search', openapi.IN_QUERY, description="Search by name, donor_id, or location", type=openapi.TYPE_STRING),
-        openapi.Parameter('donor_type', openapi.IN_QUERY, description="Filter by donor type", type=openapi.TYPE_STRING),
-        openapi.Parameter('availability_status', openapi.IN_QUERY, description="Filter by availability", type=openapi.TYPE_STRING),
-        openapi.Parameter('blood_group', openapi.IN_QUERY, description="Filter by blood group", type=openapi.TYPE_STRING),
-        openapi.Parameter('location', openapi.IN_QUERY, description="Filter by location", type=openapi.TYPE_STRING),
-        openapi.Parameter('min_age', openapi.IN_QUERY, description="Minimum age filter", type=openapi.TYPE_INTEGER),
-        openapi.Parameter('max_age', openapi.IN_QUERY, description="Maximum age filter", type=openapi.TYPE_INTEGER),
-        openapi.Parameter('gender', openapi.IN_QUERY, description="Filter by gender", type=openapi.TYPE_STRING),
-        openapi.Parameter('education_level', openapi.IN_QUERY, description="Filter by education level", type=openapi.TYPE_STRING),
-        openapi.Parameter('is_active', openapi.IN_QUERY, description="Filter by active status", type=openapi.TYPE_BOOLEAN),
-    ],
-    responses={200: DonorListSerializer(many=True)},
-    operation_description="Get all donors with filters (Clinic sees only their donors, Admin/SubAdmin see all)",
-    tags=['Donor Management']
-)
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def donor_list(request):
-    """Get all donors with filters"""
-    if not (request.user.is_admin or request.user.is_subadmin or request.user.is_clinic):
-        return Response(
-            {"detail": "Access denied."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-    
-    # Base queryset
-    queryset = Donor.objects.select_related('clinic', 'created_by').prefetch_related('images')
-    
-    # Clinic can only see their own donors
-    if request.user.is_clinic:
-        queryset = queryset.filter(clinic=request.user)
-    
-    # Search functionality
-    search = request.query_params.get('search', None)
-    if search:
-        queryset = queryset.filter(
-            Q(first_name__icontains=search) | 
-            Q(last_name__icontains=search) | 
-            Q(donor_id__icontains=search) |
-            Q(location__icontains=search) |
-            Q(email__icontains=search) |
-            Q(phone_number__icontains=search)
-        )
-    
-    # Filter by donor type
-    donor_type = request.query_params.get('donor_type', None)
-    if donor_type:
-        queryset = queryset.filter(donor_type=donor_type)
-    
-    # Filter by availability status
-    availability_status = request.query_params.get('availability_status', None)
-    if availability_status:
-        queryset = queryset.filter(availability_status=availability_status)
-    
-    # Filter by blood group
-    blood_group = request.query_params.get('blood_group', None)
-    if blood_group:
-        queryset = queryset.filter(blood_group=blood_group)
-    
-    # Filter by location
-    location = request.query_params.get('location', None)
-    if location:
-        queryset = queryset.filter(location__icontains=location)
-    
-    # Filter by gender
-    gender = request.query_params.get('gender', None)
-    if gender:
-        queryset = queryset.filter(gender=gender)
-    
-    # Filter by education level
-    education_level = request.query_params.get('education_level', None)
-    if education_level:
-        queryset = queryset.filter(education_level=education_level)
-    
-    # Age filtering
-    min_age = request.query_params.get('min_age', None)
-    max_age = request.query_params.get('max_age', None)
-    
-    if min_age or max_age:
-        from datetime import date, timedelta
-        today = date.today()
-        
-        if min_age:
-            max_birth_date = today - timedelta(days=int(min_age) * 365)
-            queryset = queryset.filter(date_of_birth__lte=max_birth_date)
-        
-        if max_age:
-            min_birth_date = today - timedelta(days=int(max_age) * 365)
-            queryset = queryset.filter(date_of_birth__gte=min_birth_date)
-    
-    # Active status filter
-    is_active = request.query_params.get('is_active', None)
-    if is_active is not None:
-        queryset = queryset.filter(is_active=is_active.lower() == 'true')
-    
-    # Order by
-    queryset = queryset.order_by('-created_at')
-    
-    # Pagination
-    paginator = StandardResultsSetPagination()
-    paginated_queryset = paginator.paginate_queryset(queryset, request)
-    serializer = DonorListSerializer(paginated_queryset, many=True)
-    
-    return paginator.get_paginated_response(serializer.data)
-
-
-@swagger_auto_schema(
-    method='get',
-    responses={200: DonorDetailSerializer()},
-    operation_description="Get donor details",
-    tags=['Donor Management']
-)
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def donor_detail(request, donor_id):
-    """Get specific donor details"""
-    if not (request.user.is_admin or request.user.is_subadmin or request.user.is_clinic):
-        return Response(
-            {"detail": "Access denied."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-    
-    queryset = Donor.objects.select_related('clinic', 'created_by').prefetch_related('images', 'documents_files')
-    
-    # Clinic can only see their own donors
-    if request.user.is_clinic:
-        queryset = queryset.filter(clinic=request.user)
-    
-    donor = get_object_or_404(queryset, id=donor_id)
-    serializer = DonorDetailSerializer(donor)
-    
-    return Response({
-        'success': True,
-        'donor': serializer.data
-    })
-
-
-@swagger_auto_schema(
-    method='put',
-    request_body=DonorUpdateSerializer,
-    responses={200: DonorDetailSerializer()},
-    operation_description="Update donor information (Clinic can update only their donors)",
-    tags=['Donor Management']
-)
-@api_view(['PUT'])
-@permission_classes([IsAuthenticated])
-def donor_update(request, donor_id):
-    """Update donor information"""
-    if not (request.user.is_admin or request.user.is_subadmin or request.user.is_clinic):
-        return Response(
-            {"detail": "Access denied."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-    
-    queryset = Donor.objects.all()
-    
-    # Clinic can only update their own donors
-    if request.user.is_clinic:
-        queryset = queryset.filter(clinic=request.user)
-    
-    donor = get_object_or_404(queryset, id=donor_id)
-    
-    serializer = DonorUpdateSerializer(donor, data=request.data, partial=True)
-    if serializer.is_valid():
-        donor = serializer.save()
-        return Response({
-            'success': True,
-            'message': 'Donor updated successfully',
-            'donor': DonorDetailSerializer(donor).data
-        })
-    
-    return Response({
-        'success': False,
-        'errors': serializer.errors
-    }, status=status.HTTP_400_BAD_REQUEST)
-
-
-@swagger_auto_schema(
-    method='delete',
-    responses={204: "Donor deleted successfully"},
-    operation_description="Delete donor (Clinic can delete only their donors)",
-    tags=['Donor Management']
-)
-@api_view(['DELETE'])
-@permission_classes([IsAuthenticated])
-def donor_delete(request, donor_id):
-    """Delete donor"""
-    if not (request.user.is_admin or request.user.is_subadmin or request.user.is_clinic):
-        return Response(
-            {"detail": "Access denied."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-    
-    queryset = Donor.objects.all()
-    
-    # Clinic can only delete their own donors
-    if request.user.is_clinic:
-        queryset = queryset.filter(clinic=request.user)
-    
-    donor = get_object_or_404(queryset, id=donor_id)
-    print("donor:", donor)
-    print("doner appointment",Appointment.objects.filter(
-        Q(reason_for_consultation__icontains='donor') |
-        Q(additional_notes__icontains=donor.donor_id)
-    ))
-    # Check if donor has any appointments
-    if Appointment.objects.filter(
-        Q(reason_for_consultation__icontains='donor') |
-        Q(additional_notes__icontains=donor.donor_id)
-    ).exists():
-        return Response({
-            'success': False,
-            'message': 'Cannot delete donor with existing appointments.'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    
-    donor.delete()
-    return Response({
-        'success': True,
-        'message': 'Donor deleted successfully'
-    }, status=status.HTTP_204_NO_CONTENT)
 
 
 # ====================== DONOR IMPORT/EXPORT ======================
@@ -2827,144 +2562,437 @@ def donor_statistics(request):
             'inactive_donors': queryset.filter(is_active=False).count(),
         }
     })
-
-
-# ====================== DONOR IMAGE/DOCUMENT MANAGEMENT ======================
-
 @swagger_auto_schema(
-    method='post',
+    method='get',
+    operation_description="View all donors for the authenticated clinic with pagination and filtering",
     manual_parameters=[
-        openapi.Parameter('image', openapi.IN_FORM, type=openapi.TYPE_FILE, required=True),
-        openapi.Parameter('caption', openapi.IN_FORM, type=openapi.TYPE_STRING),
-        openapi.Parameter('is_primary', openapi.IN_FORM, type=openapi.TYPE_BOOLEAN),
+        openapi.Parameter('page', openapi.IN_QUERY, description="Page number", type=openapi.TYPE_INTEGER),
+        openapi.Parameter('page_size', openapi.IN_QUERY, description="Number of items per page (max 100)", type=openapi.TYPE_INTEGER),
+        openapi.Parameter('search', openapi.IN_QUERY, description="Search by name, donor_id, or location", type=openapi.TYPE_STRING),
+        openapi.Parameter('donor_type', openapi.IN_QUERY, description="Filter by donor type", type=openapi.TYPE_STRING),
+        openapi.Parameter('availability_status', openapi.IN_QUERY, description="Filter by availability status", type=openapi.TYPE_STRING),
+        openapi.Parameter('gender', openapi.IN_QUERY, description="Filter by gender", type=openapi.TYPE_STRING),
+        openapi.Parameter('blood_group', openapi.IN_QUERY, description="Filter by blood group", type=openapi.TYPE_STRING),
+        openapi.Parameter('ordering', openapi.IN_QUERY, description="Order by field (prefix with - for descending)", type=openapi.TYPE_STRING),
     ],
-    responses={201: DonorImageSerializer()},
-    operation_description="Add image to donor",
+    responses={
+        200: openapi.Response(
+            "List of donors",
+            DonorListSerializer(many=True)
+        )
+    },
     tags=['Donor Management']
 )
-@api_view(['POST'])
+@api_view(['GET'])
 @permission_classes([IsAuthenticated])
-@parser_classes([MultiPartParser, FormParser])
-def add_donor_image(request, donor_id):
-    """Add image to donor"""
+def view_donors(request):
+    """View all donors for the authenticated clinic with pagination and filtering"""
     if not request.user.is_clinic:
-        return Response(
-            {"detail": "Only clinics can add donor images."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
+        return Response({"detail": "Only clinics can view donors."}, status=status.HTTP_403_FORBIDDEN)
     
-    donor = get_object_or_404(Donor, id=donor_id, clinic=request.user)
-    
-    serializer = DonorImageSerializer(data=request.data)
-    if serializer.is_valid():
-        image = serializer.save(donor=donor)
+    try:
+        # Get base queryset
+        queryset = Donor.objects.filter(clinic=request.user, is_active=True)
         
-        # If this is set as primary, unset others
-        if image.is_primary:
-            DonorImage.objects.filter(donor=donor).exclude(id=image.id).update(is_primary=False)
+        # Apply search filter
+        search = request.GET.get('search', '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(donor_id__icontains=search) |
+                Q(location__icontains=search)
+            )
+        
+        # Apply filters
+        donor_type = request.GET.get('donor_type')
+        if donor_type:
+            queryset = queryset.filter(donor_type=donor_type)
+        
+        availability_status = request.GET.get('availability_status')
+        if availability_status:
+            queryset = queryset.filter(availability_status=availability_status)
+        
+        gender = request.GET.get('gender')
+        if gender:
+            queryset = queryset.filter(gender=gender)
+        
+        blood_group = request.GET.get('blood_group')
+        if blood_group:
+            queryset = queryset.filter(blood_group=blood_group)
+        
+        # Apply ordering
+        ordering = request.GET.get('ordering', '-created_at')
+        valid_ordering_fields = [
+            'created_at', '-created_at', 'updated_at', '-updated_at',
+            'first_name', '-first_name', 'last_name', '-last_name',
+            'donor_id', '-donor_id', 'age', '-age', 'donor_type', '-donor_type'
+        ]
+        
+        if ordering in valid_ordering_fields:
+            if ordering in ['age', '-age']:
+                # For age ordering, we need to order by date_of_birth in reverse
+                ordering = '-date_of_birth' if ordering == 'age' else 'date_of_birth'
+            queryset = queryset.order_by(ordering)
+        
+        # Pagination
+        page = request.GET.get('page', 1)
+        page_size = min(int(request.GET.get('page_size', 20)), 100)  # Max 100 items per page
+        
+        paginator = Paginator(queryset, page_size)
+        page_obj = paginator.get_page(page)
+        
+        # Serialize data
+        serializer = DonorListSerializer(page_obj, many=True)
         
         return Response({
             'success': True,
-            'message': 'Image added successfully',
-            'image': DonorImageSerializer(image).data
-        }, status=status.HTTP_201_CREATED)
+            'data': serializer.data,
+            'pagination': {
+                'current_page': page_obj.number,
+                'total_pages': paginator.num_pages,
+                'total_items': paginator.count,
+                'page_size': page_size,
+                'has_next': page_obj.has_next(),
+                'has_previous': page_obj.has_previous(),
+            },
+            'filters_applied': {
+                'search': search,
+                'donor_type': donor_type,
+                'availability_status': availability_status,
+                'gender': gender,
+                'blood_group': blood_group,
+                'ordering': request.GET.get('ordering', '-created_at')
+            }
+        })
     
-    return Response({
-        'success': False,
-        'errors': serializer.errors
-    }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        logger.error(f"Error in view_donors: {str(e)}")
+        return Response({
+            'success': False,
+            'message': f'An error occurred while fetching donors: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+# Get Single Donor API
+@swagger_auto_schema(
+    method='get',
+    operation_description="Get detailed information about a specific donor",
+    responses={
+        200: openapi.Response("Donor details", DonorDetailSerializer),
+        404: openapi.Response("Donor not found")
+    },
+    tags=['Donor Management']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_donor_detail(request, donor_id):
+    """Get detailed information about a specific donor"""
+    if not request.user.is_clinic:
+        return Response({"detail": "Only clinics can view donor details."}, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        donor = Donor.objects.get(
+            donor_id=donor_id,
+            clinic=request.user,
+            is_active=True
+        )
+        
+        serializer = DonorDetailSerializer(donor)
+        return Response({
+            'success': True,
+            'data': serializer.data
+        })
+    
+    except Donor.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Donor not found or does not belong to your clinic'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    except Exception as e:
+        logger.error(f"Error in get_donor_detail: {str(e)}")
+        return Response({
+            'success': False,
+            'message': f'An error occurred while fetching donor details: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+# Delete Single Donor API
 @swagger_auto_schema(
     method='delete',
-    responses={204: "Image deleted successfully"},
-    operation_description="Delete donor image",
+    operation_description="Delete a specific donor and remove their embeddings from Pinecone",
+    responses={
+        200: openapi.Response("Donor deleted successfully"),
+        404: openapi.Response("Donor not found")
+    },
     tags=['Donor Management']
 )
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
-def delete_donor_image(request, donor_id, image_id):
-    """Delete donor image"""
+def delete_donor(request, donor_id):
+    """Delete a specific donor and remove their embeddings from Pinecone"""
     if not request.user.is_clinic:
-        return Response(
-            {"detail": "Only clinics can delete donor images."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
+        return Response({"detail": "Only clinics can delete donors."}, status=status.HTTP_403_FORBIDDEN)
     
-    donor = get_object_or_404(Donor, id=donor_id, clinic=request.user)
-    image = get_object_or_404(DonorImage, id=image_id, donor=donor)
+    try:
+        with transaction.atomic():
+            donor = Donor.objects.get(
+                donor_id=donor_id,
+                clinic=request.user,
+                is_active=True
+            )
+            
+            # Store donor info for embedding deletion
+            donor_info = {
+                'donor_id': donor.donor_id,
+                'clinic_id': str(request.user.id),
+                'full_name': donor.full_name
+            }
+            
+            # Soft delete the donor
+            donor.is_active = False
+            donor.save()
+            
+            # Delete embeddings in background thread
+            embedding_service = EmbeddingService()
+            thread = threading.Thread(
+                target=embedding_service.delete_donor_embedding,
+                args=(donor_info['donor_id'], donor_info['clinic_id'])
+            )
+            thread.daemon = True
+            thread.start()
+            
+            return Response({
+                'success': True,
+                'message': f'Donor {donor_info["full_name"]} ({donor_id}) deleted successfully'
+            })
     
-    image.delete()
-    return Response({
-        'success': True,
-        'message': 'Image deleted successfully'
-    }, status=status.HTTP_204_NO_CONTENT)
+    except Donor.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Donor not found or does not belong to your clinic'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    except Exception as e:
+        logger.error(f"Error in delete_donor: {str(e)}")
+        return Response({
+            'success': False,
+            'message': f'An error occurred while deleting donor: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
+# Bulk Delete Donors API
 @swagger_auto_schema(
     method='post',
-    manual_parameters=[
-        openapi.Parameter('document_type', openapi.IN_FORM, type=openapi.TYPE_STRING, required=True),
-        openapi.Parameter('document', openapi.IN_FORM, type=openapi.TYPE_FILE, required=True),
-        openapi.Parameter('document_name', openapi.IN_FORM, type=openapi.TYPE_STRING),
-        openapi.Parameter('description', openapi.IN_FORM, type=openapi.TYPE_STRING),
-    ],
-    responses={201: DonorDocumentSerializer()},
-    operation_description="Add document to donor",
+    request_body=DonorBulkDeleteSerializer,
+    operation_description="Delete multiple donors at once and remove their embeddings from Pinecone",
+    responses={
+        200: openapi.Response("Donors deleted successfully"),
+        400: openapi.Response("Invalid request data")
+    },
     tags=['Donor Management']
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-@parser_classes([MultiPartParser, FormParser])
-def add_donor_document(request, donor_id):
-    """Add document to donor"""
+def bulk_delete_donors(request):
+    """Delete multiple donors at once and remove their embeddings from Pinecone"""
     if not request.user.is_clinic:
-        return Response(
-            {"detail": "Only clinics can add donor documents."},
-            status=status.HTTP_403_FORBIDDEN,
+        return Response({"detail": "Only clinics can delete donors."}, status=status.HTTP_403_FORBIDDEN)
+    
+    serializer = DonorBulkDeleteSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response({
+            'success': False,
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    donor_ids = serializer.validated_data['donor_ids']
+    
+    try:
+        with transaction.atomic():
+            # Get donors that exist and belong to the clinic
+            existing_donors = Donor.objects.filter(
+                donor_id__in=donor_ids,
+                clinic=request.user,
+                is_active=True
+            )
+            
+            if not existing_donors.exists():
+                return Response({
+                    'success': False,
+                    'message': 'No valid donors found to delete'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Store donor info for embedding deletion
+            donors_info = []
+            deleted_donors = []
+            
+            for donor in existing_donors:
+                donors_info.append({
+                    'donor_id': donor.donor_id,
+                    'clinic_id': str(request.user.id)
+                })
+                deleted_donors.append({
+                    'donor_id': donor.donor_id,
+                    'name': donor.full_name
+                })
+            
+            # Soft delete donors
+            existing_donors.update(is_active=False)
+            
+            # Delete embeddings in background thread
+            if donors_info:
+                embedding_service = EmbeddingService()
+                thread = threading.Thread(
+                    target=embedding_service.bulk_delete_embeddings,
+                    args=(donors_info,)
+                )
+                thread.daemon = True
+                thread.start()
+            
+            # Check for donors that were not found
+            found_ids = [donor.donor_id for donor in existing_donors]
+            not_found_ids = [donor_id for donor_id in donor_ids if donor_id not in found_ids]
+            
+            response_data = {
+                'success': True,
+                'message': f'Successfully deleted {len(deleted_donors)} donors',
+                'deleted_donors': deleted_donors,
+                'deleted_count': len(deleted_donors)
+            }
+            
+            if not_found_ids:
+                response_data['not_found_donors'] = not_found_ids
+                response_data['message'] += f'. {len(not_found_ids)} donors were not found.'
+            
+            return Response(response_data)
+    
+    except Exception as e:
+        logger.error(f"Error in bulk_delete_donors: {str(e)}")
+        return Response({
+            'success': False,
+            'message': f'An error occurred while deleting donors: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@swagger_auto_schema(
+    method='put',
+    request_body=DonorUpdateSerializer,
+    responses={
+        200: openapi.Response("Donor updated successfully", DonorDetailSerializer),
+        400: openapi.Response("Validation errors"),
+        403: openapi.Response("Permission denied"),
+        404: openapi.Response("Donor not found")
+    },
+    operation_description="Update donor information (Clinic only). All fields are optional for partial updates.",
+    tags=['Donor Management']
+)
+@api_view(['PUT'])
+@permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def update_donor(request, donor_id):
+    """Update donor information - Clinic only (Full Update)"""
+    if not request.user.is_clinic:
+        return Response({"detail": "Only clinics can update donors."}, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        # Get the donor belonging to the authenticated clinic
+        donor = Donor.objects.get(
+            donor_id=donor_id,
+            clinic=request.user,
+            is_active=True
         )
-    
-    donor = get_object_or_404(Donor, id=donor_id, clinic=request.user)
-    
-    serializer = DonorDocumentSerializer(data=request.data)
-    if serializer.is_valid():
-        document = serializer.save(donor=donor)
+        
+        # Serialize the data with partial update support
+        serializer = DonorUpdateSerializer(donor, data=request.data, partial=True, context={'request': request})
+        
+        if not serializer.is_valid():
+            return Response({
+                'success': False,
+                'message': 'Validation errors occurred',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        updated_donor = serializer.save()
+        # Return the updated donor details
+        response_serializer = DonorDetailSerializer(updated_donor)
+        
         return Response({
             'success': True,
-            'message': 'Document added successfully',
-            'document': DonorDocumentSerializer(document).data
-        }, status=status.HTTP_201_CREATED)
+            'message': 'Donor updated successfully',
+            'data': response_serializer.data
+        })
+        
+    except Donor.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Donor not found or does not belong to your clinic'
+        }, status=status.HTTP_404_NOT_FOUND)
     
-    return Response({
-        'success': False,
-        'errors': serializer.errors
-    }, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        logger.error(f"Error in update_donor: {str(e)}")
+        return Response({
+            'success': False,
+            'message': f'An error occurred while updating donor: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @swagger_auto_schema(
-    method='delete',
-    responses={204: "Document deleted successfully"},
-    operation_description="Delete donor document",
+    method='patch',
+    request_body=DonorUpdateSerializer,
+    responses={
+        200: openapi.Response("Donor updated successfully", DonorDetailSerializer),
+        400: openapi.Response("Validation errors"),
+        403: openapi.Response("Permission denied"),
+        404: openapi.Response("Donor not found")
+    },
+    operation_description="Partially update donor information (Clinic only). Only provided fields will be updated.",
     tags=['Donor Management']
 )
-@api_view(['DELETE'])
+@api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
-def delete_donor_document(request, donor_id, document_id):
-    """Delete donor document"""
+@parser_classes([MultiPartParser, FormParser, JSONParser])
+def partial_update_donor(request, donor_id):
+    """Partially update donor information - Clinic only"""
     if not request.user.is_clinic:
-        return Response(
-            {"detail": "Only clinics can delete donor documents."},
-            status=status.HTTP_403_FORBIDDEN,
+        return Response({"detail": "Only clinics can update donors."}, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        donor = Donor.objects.get(
+            donor_id=donor_id,
+            clinic=request.user,
+            is_active=True
         )
+        
+        serializer = DonorUpdateSerializer(donor, data=request.data, partial=True, context={'request': request})
+        
+        if not serializer.is_valid():
+            return Response({
+                'success': False,
+                'message': 'Validation errors occurred',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        updated_donor = serializer.save()
+        # Return the updated donor details
+        response_serializer = DonorDetailSerializer(updated_donor)
+        
+        return Response({
+            'success': True,
+            'message': 'Donor updated successfully',
+            'data': response_serializer.data,
+            'updated_fields': list(request.data.keys())
+        })
+        
+    except Donor.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Donor not found or does not belong to your clinic'
+        }, status=status.HTTP_404_NOT_FOUND)
     
-    donor = get_object_or_404(Donor, id=donor_id, clinic=request.user)
-    document = get_object_or_404(DonorDocument, id=document_id, donor=donor)
-    
-    document.delete()
-    return Response({
-        'success': True,
-        'message': 'Document deleted successfully'
-    }, status=status.HTTP_204_NO_CONTENT)
+    except Exception as e:
+        logger.error(f"Error in partial_update_donor: {str(e)}")
+        return Response({
+            'success': False,
+            'message': f'An error occurred while updating donor: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 ###############################AI MATCHING ENDPOINTS####################################
 @api_view(['POST'])
@@ -3144,7 +3172,6 @@ def generate_donor_embeddings(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def find_matching_donors(request):
-    """Find matching donors for a parent's fertility profile with enhanced logic."""
     if not request.user.is_parent:
         return Response({"detail": "Only parents can search for matching donors."}, status=status.HTTP_403_FORBIDDEN)
     

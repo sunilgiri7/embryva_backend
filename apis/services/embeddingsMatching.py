@@ -12,9 +12,6 @@ import uuid # Import uuid
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-# ================== EMBEDDING SERVICE (REFINED) ==================
-
 class EmbeddingService:
     def __init__(self):
         # Using a more powerful model can yield better semantic results
@@ -152,20 +149,32 @@ class EmbeddingService:
             raise
 
     def store_donor_embedding(self, donor_id: str, clinic_id: str, embedding: List[float], metadata: Dict):
-        self.initialize_pinecone()
-        vector_id = f"{clinic_id}_{donor_id}"
-        self.index.upsert(vectors=[{
-            "id": vector_id,
-            "values": embedding,
-            "metadata": {
+        try:
+            self.initialize_pinecone()
+            vector_id = f"{clinic_id}_{donor_id}"
+            
+            # Ensure metadata doesn't contain null values
+            clean_metadata = {k: v for k, v in metadata.items() if v is not None}
+            
+            # Add system metadata
+            clean_metadata.update({
                 "donor_id": donor_id,
                 "clinic_id": clinic_id,
-                "donor_type": metadata.get("donor_type"),
                 "created_at": datetime.now().isoformat(),
-                **metadata
-            }
-        }])
-        logger.info(f"Stored embedding for donor {donor_id} from clinic {clinic_id}")
+            })
+            
+            # Upsert vector
+            self.index.upsert(vectors=[{
+                "id": vector_id,
+                "values": embedding,
+                "metadata": clean_metadata
+            }])
+            
+            logger.info(f"Stored embedding for donor {donor_id} from clinic {clinic_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to store embedding for donor {donor_id}: {e}", exc_info=True)
+            raise
 
     def search_similar_donors(self, profile_embedding: List[float], top_k: int = 50, donor_type_filter: str = None) -> List[Dict]:
         self.initialize_pinecone()
@@ -188,10 +197,6 @@ class EmbeddingService:
         } for match in search_response.matches]
 
     def bulk_process_and_store_embeddings(self, donor_data_list: List[Dict]):
-        """
-        Generates and stores embeddings for a batch of donors efficiently.
-        This is the preferred method for bulk imports.
-        """
         if not donor_data_list:
             return
 
@@ -240,6 +245,54 @@ class EmbeddingService:
 
         except Exception as e:
             logger.error(f"Failed during bulk embedding process: {e}", exc_info=True)
+
+    def delete_donor_embedding(self, donor_id: str, clinic_id: str):
+        """Delete a single donor's embedding from Pinecone"""
+        try:
+            self.initialize_pinecone()
+            vector_id = f"{clinic_id}_{donor_id}"
+            
+            # Delete from Pinecone
+            self.index.delete(ids=[vector_id])
+            logger.info(f"Deleted embedding for donor {donor_id} from clinic {clinic_id}")
+            
+        except Exception as e:
+            logger.error(f"Failed to delete embedding for donor {donor_id}: {e}")
+    
+    def bulk_delete_embeddings(self, donors_info: List[Dict]):
+        """Delete multiple donors' embeddings from Pinecone efficiently"""
+        try:
+            self.initialize_pinecone()
+            
+            # Create vector IDs for deletion
+            vector_ids = [f"{donor['clinic_id']}_{donor['donor_id']}" for donor in donors_info]
+            
+            # Delete from Pinecone in batches
+            batch_size = 100
+            for i in range(0, len(vector_ids), batch_size):
+                batch = vector_ids[i:i + batch_size]
+                self.index.delete(ids=batch)
+            
+            logger.info(f"Bulk deleted {len(vector_ids)} embeddings from Pinecone")
+            
+        except Exception as e:
+            logger.error(f"Failed to bulk delete embeddings: {e}")
+    
+    def get_embedding_stats(self, clinic_id: str) -> Dict:
+        """Get statistics about embeddings for a specific clinic"""
+        try:
+            self.initialize_pinecone()    
+            stats = self.index.describe_index_stats()
+        
+            return {
+                'total_vectors': stats.total_vector_count,
+                'dimension': stats.dimension,
+                'index_fullness': stats.index_fullness
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get embedding stats: {e}")
+            return {}
 
 
 # ================== MATCHING ENGINE (UPGRADED) ==================
