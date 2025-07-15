@@ -3,8 +3,9 @@ from django.dispatch import receiver
 import logging
 import threading
 
-from apis.models import Donor
+from apis.models import Donor, SubscriptionPlan
 from apis.services.embeddingsMatching import EmbeddingService
+from apis.services.stripe_service import sync_subscription_plan
 
 logger = logging.getLogger(__name__)
 
@@ -50,3 +51,8 @@ def donor_post_save_receiver(sender, instance, created, **kwargs):
     thread = threading.Thread(target=generate_and_store_embedding, args=(instance,))
     thread.daemon = True
     thread.start()
+
+@receiver(post_save, sender=SubscriptionPlan)
+def handle_subscription_plan_save(sender, instance, created, **kwargs):
+    if not instance.stripe_price_id:
+        sync_subscription_plan(instance)

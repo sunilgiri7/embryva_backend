@@ -48,6 +48,8 @@ class User(AbstractUser):
     # Email verification fields
     email_verification_token = models.UUIDField(default=uuid.uuid4, editable=False)
     email_verification_sent_at = models.DateTimeField(null=True, blank=True)
+
+    stripe_customer_id = models.CharField(max_length=255, blank=True, null=True, unique=True, help_text="Stripe customer ID for this user.")
     
     # Parent specific fields
     relationship_to_child = models.CharField(
@@ -262,9 +264,8 @@ class SubscriptionPlan(models.Model):
     )
     
     BILLING_CYCLES = (
-        ('monthly', 'Monthly'),
-        ('quarterly', 'Quarterly'),  # Added quarterly option
-        ('yearly', 'Yearly'),        # Changed from 'annually' to 'yearly'
+        ('month', 'Monthly'),
+        ('year', 'Yearly'),
     )
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -274,6 +275,9 @@ class SubscriptionPlan(models.Model):
     description = models.TextField(blank=True, null=True)
     features = models.JSONField(default=dict, blank=True)  # Store plan features as JSON
     is_active = models.BooleanField(default=True)
+
+    stripe_price_id = models.CharField(max_length=255, blank=True, null=True, help_text="The ID of the corresponding price object in Stripe.")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True)
@@ -313,6 +317,8 @@ class UserSubscription(models.Model):
     end_date = models.DateTimeField()
     payment_status = models.CharField(max_length=20, default='pending')
     transaction_id = models.CharField(max_length=255, blank=True, null=True)
+    stripe_subscription_id = models.CharField(max_length=255, blank=True, null=True, unique=True, help_text="The ID of the subscription in Stripe.")
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -449,7 +455,7 @@ class Donor(models.Model):
     date_of_birth = models.DateField()
     
     # Contact Information
-    phone_number = models.CharField(max_length=17)
+    phone_number = models.CharField(max_length=25)
     email = models.EmailField(blank=True, null=True)
     location = models.CharField(max_length=255)
     address = models.TextField(blank=True, null=True)

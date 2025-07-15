@@ -2,20 +2,21 @@ version: "3.9"
 
 services:
   redis:
-    image: redis:6-alpine  # Much smaller Alpine-based image
+    image: redis:6
     network_mode: host
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
       timeout: 10s
       retries: 3
-    restart: unless-stopped
 
   web:
     build: .
     network_mode: host
     command: gunicorn embryva_backend.wsgi:application \
              --bind 0.0.0.0:8080 --workers 3 --timeout 120
+    volumes:
+      - .:/app
     env_file: .env
     environment:
       DJANGO_SETTINGS_MODULE: embryva_backend.settings
@@ -23,22 +24,18 @@ services:
       redis:
         condition: service_healthy
     restart: always
-    # Remove volume mount in production for security and performance
-    # volumes:
-    #   - .:/app
 
   worker:
     build: .
     network_mode: host
     command: celery -A embryva_backend worker --loglevel=info --concurrency=2
+    volumes:
+      - .:/app
     env_file: .env
     environment:
       DJANGO_SETTINGS_MODULE: embryva_backend.settings
     depends_on: [redis]
     restart: unless-stopped
-    # Remove volume mount in production
-    # volumes:
-    #   - .:/app
 
   beat:
     build: .
@@ -48,6 +45,8 @@ services:
       "--loglevel=info",
       "--scheduler", "django_celery_beat.schedulers:DatabaseScheduler"
     ]
+    volumes:
+      - .:/app
     env_file:
       - .env
     environment:
@@ -55,6 +54,3 @@ services:
     depends_on:
       - redis
     restart: unless-stopped
-    # Remove volume mount in production
-    # volumes:
-    #   - .:/app

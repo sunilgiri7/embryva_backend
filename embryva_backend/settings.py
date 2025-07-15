@@ -38,6 +38,7 @@ INSTALLED_APPS = [
     'django_celery_beat',
     'django_celery_results',
     'apis',
+    'external_api',
 ]
 
 MIDDLEWARE = [
@@ -124,6 +125,10 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 CELERY_ENABLE_UTC = True
+
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', 'your_stripe_secret_key')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', 'your_stripe_webhook_secret')
+STRIPE_REDIRECT_DOMAIN = os.getenv('FRONTEND_URL', 'http://0.0.0.0:8080') 
 
 CELERY_BEAT_SCHEDULE = {
     'send-meeting-reminder-emails': {

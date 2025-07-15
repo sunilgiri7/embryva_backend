@@ -54,6 +54,11 @@ urlpatterns = [
     path('admin/subscription/subscriptions/<uuid:pk>/cancel/', views.UserSubscriptionViewSet.as_view({'post': 'cancel'}), name='user-subscriptions-cancel'),
     path('admin/subscription/subscriptions/<uuid:pk>/renew/', views.UserSubscriptionViewSet.as_view({'post': 'renew'}), name='user-subscriptions-renew'),
 
+    # ======================= STRIPE PAYMENT URLS =======================
+    path('payments/create-checkout-session/', views.create_checkout_session, name='create-checkout-session'),
+    path('payments/create-customer-portal-session/', views.create_customer_portal_session, name='create-customer-portal-session'),
+    path('payments/stripe-webhook/', views.stripe_webhook, name='stripe-webhook'), # This URL needs to be added to your Stripe dashboard
+
     # Subscription Utilities
     path('admin/subscription/stats/', views.UserSubscriptionViewSet.as_view({'get': 'subscription_stats'}), name='subscription-stats'),
 

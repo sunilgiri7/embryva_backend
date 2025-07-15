@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 import io
 import logging
@@ -16,7 +16,8 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 import urllib
 from apis.email_service import EmailService
 from apis.services.embeddingsMatching import DonorMatchingEngine, EmbeddingService, MatchResult
-from apis.utils import CustomPageNumberPagination, generate_unique_donor_id
+from apis.services.stripe_service import create_stripe_customer
+from apis.utils import CustomPageNumberPagination, generate_unique_donor_id, process_donor_data, validate_donor_row
 from .models import Appointment, MatchingResult, Meeting, User
 from django.db.models import Q, Count
 from .serializers import *
@@ -31,6 +32,8 @@ import json
 from django.db import transaction
 from django.http import HttpResponse
 from django.db import models
+import stripe
+from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view, permission_classes, parser_classes
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -2741,155 +2744,6 @@ def import_donors(request):
     except Exception as e:
         return Response({'success': False, 'message': f'An unexpected error occurred: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-# Helper Functions
-def validate_donor_row(row_data, row_number):
-    """
-    Validates individual donor row data, checking for required fields
-    and valid values within the row itself.
-    """
-    errors = []
-    
-    # --- Required Fields Validation ---
-    required_fields = [
-        'first_name', 'last_name', 'gender', 'date_of_birth', 
-        'phone_number', 'blood_group'
-    ]
-    for field in required_fields:
-        if pd.isna(row_data.get(field)) or str(row_data.get(field, '')).strip() == '':
-            errors.append({
-                'row': row_number,
-                'field': field,
-                'error': f'"{field}" is a required field and cannot be empty.'
-            })
-
-    # --- Donor Type Validation (from row) ---
-    valid_donor_types = [choice[0] for choice in Donor.DONOR_TYPES]
-    donor_type_value = str(row_data.get('donor_type', '')).strip().lower()
-    if not donor_type_value:
-        errors.append({
-            'row': row_number,
-            'field': 'donor_type',
-            'error': '"donor_type" is a required field in the file.'
-        })
-    elif donor_type_value not in valid_donor_types:
-        errors.append({
-            'row': row_number,
-            'field': 'donor_type',
-            'error': f'Invalid donor_type "{row_data.get("donor_type")}". Must be one of: {", ".join(valid_donor_types)}.'
-        })
-
-    # --- Specific Field Content Validation ---
-    
-    # Validate gender
-    gender_value = str(row_data.get('gender', '')).strip().lower()
-    if gender_value and gender_value not in ['male', 'female']:
-        errors.append({
-            'row': row_number, 'field': 'gender', 'error': 'Gender must be "male" or "female".'
-        })
-
-    # # Validate blood group
-    # valid_blood_groups = [choice[0] for choice in Donor.BLOOD_GROUPS]
-    # blood_group_value = str(row_data.get('blood_group', '')).strip().upper()
-    # if blood_group_value and blood_group_value not in valid_blood_groups:
-    #     errors.append({
-    #         'row': row_number, 'field': 'blood_group',
-    #         'error': f'Blood group must be one of: {", ".join(valid_blood_groups)}.'
-    #     })
-
-    # Validate date of birth
-    dob_value = row_data.get('date_of_birth')
-    if dob_value and pd.notna(dob_value):
-        try:
-            dob = pd.to_datetime(str(dob_value)).date()
-            today = date.today()
-            age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-            if age < 18:
-                errors.append({'row': row_number, 'field': 'date_of_birth', 'error': 'Donor must be at least 18 years old.'})
-            elif age > 65:
-                errors.append({'row': row_number, 'field': 'date_of_birth', 'error': 'Donor age cannot exceed 65 years.'})
-        except (ValueError, TypeError, pd.errors.OutOfBoundsDatetime):
-            errors.append({'row': row_number, 'field': 'date_of_birth', 'error': 'Invalid date format. Use YYYY-MM-DD.'})
-
-    # Validate numeric fields
-    numeric_fields = {'height': 'Height', 'weight': 'Weight', 'number_of_children': 'Number of children'}
-    for field, display_name in numeric_fields.items():
-        value = row_data.get(field)
-        if value is not None and str(value).strip() != '':
-            try:
-                num_value = float(str(value).strip())
-                if num_value < 0:
-                    errors.append({'row': row_number, 'field': field, 'error': f'{display_name} cannot be negative.'})
-            except (ValueError, TypeError):
-                errors.append({'row': row_number, 'field': field, 'error': f'{display_name} must be a valid number.'})
-
-    # Validate boolean fields
-    smoking_status = row_data.get('smoking_status')
-    if smoking_status is not None and str(smoking_status).strip() != '':
-        smoking_str = str(smoking_status).strip().lower()
-        if smoking_str not in ['true', 'false', '1', '0', 'yes', 'no']:
-            errors.append({'row': row_number, 'field': 'smoking_status', 'error': 'Smoking status must be TRUE/FALSE, YES/NO, or 1/0.'})
-            
-    return {'errors': errors}
-
-def process_donor_data(row_data, clinic_user):
-    """
-    Processes and converts a single row of data to the Donor model format.
-    """
-    processed_data = {}
-    # Complete field mapping from CSV/Excel column to Donor model field
-    field_mapping = {
-        'title': 'title', 'first_name': 'first_name', 'last_name': 'last_name', 'gender': 'gender',
-        'date_of_birth': 'date_of_birth', 'phone_number': 'phone_number', 'email': 'email',
-        'location': 'location', 'address': 'address', 'city': 'city', 'state': 'state',
-        'country': 'country', 'postal_code': 'postal_code', 'donor_type': 'donor_type',
-        'blood_group': 'blood_group', 'height': 'height', 'weight': 'weight',
-        'eye_color': 'eye_color', 'hair_color': 'hair_color', 'skin_tone': 'skin_tone',
-        'education_level': 'education_level', 'occupation': 'occupation', 'marital_status': 'marital_status',
-        'religion': 'religion', 'ethnicity': 'ethnicity', 'medical_history': 'medical_history',
-        'genetic_conditions': 'genetic_conditions', 'medications': 'medications', 'allergies': 'allergies',
-        'smoking_status': 'smoking_status', 'alcohol_consumption': 'alcohol_consumption',
-        'exercise_frequency': 'exercise_frequency', 'number_of_children': 'number_of_children',
-        'family_medical_history': 'family_medical_history', 'personality_traits': 'personality_traits',
-        'interests_hobbies': 'interests_hobbies', 'notes': 'notes'
-    }
-
-    for csv_field, model_field in field_mapping.items():
-        if csv_field in row_data and pd.notna(row_data[csv_field]):
-            value = str(row_data[csv_field]).strip()
-            if value:
-                processed_data[model_field] = value
-
-    # --- Type Conversions and Specific Cleaning ---
-    try:
-        if 'date_of_birth' in processed_data:
-            processed_data['date_of_birth'] = pd.to_datetime(processed_data['date_of_birth']).date()
-        if 'height' in processed_data:
-            processed_data['height'] = Decimal(processed_data['height'])
-        if 'weight' in processed_data:
-            processed_data['weight'] = Decimal(processed_data['weight'])
-        if 'number_of_children' in processed_data:
-            processed_data['number_of_children'] = int(float(processed_data['number_of_children']))
-        if 'smoking_status' in processed_data:
-            processed_data['smoking_status'] = processed_data['smoking_status'].lower() in ['true', '1', 'yes']
-        if 'donor_type' in processed_data:
-            processed_data['donor_type'] = processed_data['donor_type'].lower()
-        if 'gender' in processed_data:
-            processed_data['gender'] = processed_data['gender'].lower()
-        if 'blood_group' in processed_data:
-            processed_data['blood_group'] = processed_data['blood_group'].upper()
-    except (ValueError, TypeError, InvalidOperation, pd.errors.OutOfBoundsDatetime) as e:
-        # This should be caught by validation, but acts as a safeguard.
-        # In a real scenario, you might log this conversion error.
-        pass
-
-    # --- Set Fields Not From File ---
-    processed_data['clinic'] = clinic_user
-    processed_data['created_by'] = clinic_user
-    processed_data['availability_status'] = 'pending'
-    processed_data['is_active'] = True
-    
-    return processed_data
-
 
 # ====================== DONOR STATISTICS ======================
 
@@ -3529,3 +3383,156 @@ def trigger_donor_embedding_on_create(request):
             'success': False,
             'message': f'Failed to generate embedding: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# ==============================================================================
+# STRIPE PAYMENT FLOW VIEWS
+# ==============================================================================
+
+@swagger_auto_schema(
+    method='post',
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={'plan_id': openapi.Schema(type=openapi.TYPE_STRING, description='ID of the SubscriptionPlan')}
+    ),
+    operation_description="Create a Stripe Checkout Session for a parent to subscribe to a plan.",
+    tags=['Payments']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_checkout_session(request):
+    """
+    Creates a Stripe Checkout Session to subscribe a parent to a plan.
+    """
+    user = request.user
+    if user.user_type != 'parent':
+        return Response({"error": "Only parents can subscribe to plans."}, status=status.HTTP_403_FORBIDDEN)
+
+    plan_id = request.data.get('plan_id')
+    try:
+        plan = SubscriptionPlan.objects.get(id=plan_id)
+        if not plan.stripe_price_id:
+            return Response({"error": "This plan is not configured for payment."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Get or create a Stripe Customer for the user
+        customer_id = create_stripe_customer(user)
+
+        checkout_session = stripe.checkout.Session.create(
+            customer=customer_id,
+            payment_method_types=['card'],
+            line_items=[{'price': plan.stripe_price_id, 'quantity': 1}],
+            mode='subscription',
+            success_url=settings.STRIPE_REDIRECT_DOMAIN + '/payment-success?session_id={CHECKOUT_SESSION_ID}',
+            cancel_url=settings.STRIPE_REDIRECT_DOMAIN + '/payment-cancelled',
+            metadata={'user_id': str(user.id), 'plan_id': str(plan.id)}
+        )
+        return Response({'sessionId': checkout_session.id, 'url': checkout_session.url})
+
+    except SubscriptionPlan.DoesNotExist:
+        return Response({"error": "Subscription plan not found."}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@swagger_auto_schema(
+    method='post',
+    operation_description="Create a Stripe Customer Portal session for a parent to manage their subscription.",
+    tags=['Payments']
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_customer_portal_session(request):
+    """
+    Generates a one-time link for the parent to manage their billing information.
+    """
+    user = request.user
+    if not user.stripe_customer_id:
+         return Response({"error": "User is not a Stripe customer."}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        print("stripe customer id", user.stripe_customer_id)
+        portal_session = stripe.billing_portal.Session.create(
+            customer=user.stripe_customer_id,
+            return_url=settings.STRIPE_REDIRECT_DOMAIN + '/profile',
+        )
+        return Response({'url': portal_session.url})
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@csrf_exempt
+@api_view(['POST'])
+def stripe_webhook(request):
+    """
+    Handles incoming webhooks from Stripe to update subscription statuses.
+    """
+    payload = request.body
+    sig_header = request.META.get('HTTP_STRIPE_SIGNATURE')
+    event = None
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
+        )
+    except ValueError as e:
+        # Invalid payload
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+    except stripe.error.SignatureVerificationError as e:
+        # Invalid signature
+        return Response(status=status.HTTP_400_BAD_REQUEST)
+
+    # Handle the checkout.session.completed event
+    if event['type'] == 'checkout.session.completed':
+        session = event['data']['object']
+        user_id = session.get('metadata', {}).get('user_id')
+        plan_id = session.get('metadata', {}).get('plan_id')
+        stripe_customer_id = session.get('customer')
+        stripe_subscription_id = session.get('subscription')
+
+        try:
+            user = User.objects.get(id=user_id)
+            plan = SubscriptionPlan.objects.get(id=plan_id)
+
+            # Create or update the ParentSubscription record
+            UserSubscription.objects.update_or_create(
+                user=user,
+                defaults={
+                    'plan': plan,
+                    'stripe_subscription_id': stripe_subscription_id,
+                    'status': 'active',
+                    'start_date': timezone.now(),
+                }
+            )
+
+            # Ensure the user's stripe_customer_id is saved
+            if not user.stripe_customer_id:
+                user.stripe_customer_id = stripe_customer_id
+                user.save()
+
+        except (User.DoesNotExist, SubscriptionPlan.DoesNotExist) as e:
+            print(f"Webhook Error (checkout.session.completed): {e}")
+
+    # Handle recurring payment success
+    if event['type'] == 'invoice.paid':
+        invoice = event['data']['object']
+        stripe_subscription_id = invoice.get('subscription')
+        subscription = UserSubscription.objects.filter(stripe_subscription_id=stripe_subscription_id).first()
+        if subscription:
+            stripe_sub = stripe.Subscription.retrieve(stripe_subscription_id)
+            subscription.end_date = timezone.make_aware(
+                datetime.fromtimestamp(stripe_sub.current_period_end)
+            )
+            subscription.status = 'active'
+            subscription.save()
+
+    # Handle subscription cancellation
+    if event['type'] == 'customer.subscription.deleted':
+        sub_event = event['data']['object']
+        stripe_subscription_id = sub_event.get('id')
+        subscription = UserSubscription.objects.filter(stripe_subscription_id=stripe_subscription_id).first()
+        if subscription:
+            subscription.status = 'canceled'
+            subscription.save()
+
+    # Handle other events like 'invoice.payment_failed' as needed
+
+    return Response(status=status.HTTP_200_OK)
