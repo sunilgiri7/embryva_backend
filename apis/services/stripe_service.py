@@ -4,17 +4,31 @@ from apis.models import User, SubscriptionPlan
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
-def create_stripe_customer(user: User):
-    """Creates a Stripe Customer object for a given user and saves the ID."""
-    if not user.stripe_customer_id:
+def create_stripe_customer(user):
+    """Create or retrieve Stripe customer for user"""
+    if user.stripe_customer_id:
+        return user.stripe_customer_id
+    
+    try:
+        # Create new customer in Stripe
         customer = stripe.Customer.create(
             email=user.email,
             name=user.get_full_name(),
-            metadata={'user_id': user.id}
+            phone=user.phone_number,
+            metadata={
+                'user_id': str(user.id),
+                'user_type': user.user_type
+            }
         )
+        
+        # Save customer ID to user
         user.stripe_customer_id = customer.id
-        user.save()
-    return user.stripe_customer_id
+        user.save(update_fields=['stripe_customer_id'])
+        
+        return customer.id
+    except Exception as e:
+        print(f"Error creating Stripe customer: {e}")
+        raise
 
 def sync_subscription_plan(plan: SubscriptionPlan):
     try:

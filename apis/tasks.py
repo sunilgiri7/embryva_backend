@@ -3,7 +3,7 @@ from apis.email_service import EmailService
 from celery import shared_task
 from django.utils import timezone
 from django.conf import settings
-
+from django.core.management import call_command
 from apis.services.embeddingsMatching import EmbeddingService
 from apis.utils import prepare_donor_data_for_embedding, prepare_metadata_for_pinecone
 from .models import Donor, Meeting, User
@@ -185,3 +185,11 @@ def bulk_create_donors_and_embeddings_task(processed_donor_list, clinic_id):
         logger.error(f"Critical error in bulk_create_donors_and_embeddings_task for clinic {clinic_id}: {e}", exc_info=True)
         # Re-raising the exception will cause the task to be marked as 'FAILED' in Celery, which is correct.
         raise
+
+@shared_task
+def check_expired_subscriptions():
+    call_command('check_expired_subscriptions')
+
+@shared_task
+def sync_stripe_subscriptions():
+    call_command('sync_stripe_subscriptions', fix_inconsistencies=True)

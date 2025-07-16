@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 import io
 import logging
@@ -21,7 +21,7 @@ from apis.services.signals import generate_and_store_embedding
 from apis.services.stripe_service import create_stripe_customer
 from apis.utils import CustomPageNumberPagination, generate_unique_donor_id, process_donor_data, validate_donor_row
 from .models import Appointment, MatchingResult, Meeting, User
-from django.db.models import Q, Count
+from django.db.models import Count, Sum, Q, Avg
 from .serializers import *
 from django.shortcuts import get_object_or_404, render
 from django.db.models import Q
@@ -2136,13 +2136,15 @@ class UserSubscriptionViewSet(viewsets.ModelViewSet):
     
     @action(detail=False, methods=['get'])
     def subscription_stats(self, request):
-        """Get subscription statistics"""
+        """Get flat-format subscription statistics"""
+
+        # Basic counts
         total_subscriptions = UserSubscription.objects.count()
         active_subscriptions = UserSubscription.objects.filter(status='active').count()
         expired_subscriptions = UserSubscription.objects.filter(status='expired').count()
         cancelled_subscriptions = UserSubscription.objects.filter(status='cancelled').count()
-        
-        # Plan wise statistics
+
+        # Plan-wise statistics
         plan_stats = {}
         for plan in SubscriptionPlan.objects.all():
             plan_subs = UserSubscription.objects.filter(plan=plan)
@@ -2150,16 +2152,62 @@ class UserSubscriptionViewSet(viewsets.ModelViewSet):
                 'total': plan_subs.count(),
                 'active': plan_subs.filter(status='active').count()
             }
-        
+
         # Billing cycle statistics
         billing_cycle_stats = {}
-        for cycle in ['monthly', 'quarterly', 'yearly']:
+        for cycle in ['month', 'year']:
             cycle_subs = UserSubscription.objects.filter(plan__billing_cycle=cycle)
             billing_cycle_stats[cycle] = {
                 'total': cycle_subs.count(),
                 'active': cycle_subs.filter(status='active').count()
             }
-        
+
+        # Revenue metrics
+        total_revenue = UserSubscription.objects.filter(
+            payment_status='completed'
+        ).aggregate(total=Sum('plan__price'))['total'] or 0
+
+        # Growth metrics
+        current_month = timezone.now().replace(day=1)
+        last_month = (current_month - timedelta(days=1)).replace(day=1)
+
+        current_month_subs = UserSubscription.objects.filter(
+            created_at__gte=current_month
+        ).count()
+
+        last_month_subs = UserSubscription.objects.filter(
+            created_at__gte=last_month,
+            created_at__lt=current_month
+        ).count()
+
+        growth_rate = 0
+        if last_month_subs > 0:
+            growth_rate = ((current_month_subs - last_month_subs) / last_month_subs) * 100
+
+        # Churn rate
+        thirty_days_ago = timezone.now() - timedelta(days=30)
+        cancelled_last_30 = UserSubscription.objects.filter(
+            status='cancelled',
+            updated_at__gte=thirty_days_ago
+        ).count()
+
+        active_30_days_ago = UserSubscription.objects.filter(
+            created_at__lt=thirty_days_ago,
+            status='active'
+        ).count()
+
+        churn_rate = 0
+        if active_30_days_ago > 0:
+            churn_rate = (cancelled_last_30 / active_30_days_ago) * 100
+
+        # Top plans
+        top_plans = list(UserSubscription.objects.values(
+            'plan__name', 'plan__billing_cycle'
+        ).annotate(
+            count=Count('id')
+        ).order_by('-count')[:5])
+
+        # Return everything flat under `data`
         return Response({
             'status': 'success',
             'message': 'Subscription statistics retrieved successfully',
@@ -2168,11 +2216,16 @@ class UserSubscriptionViewSet(viewsets.ModelViewSet):
                 'active_subscriptions': active_subscriptions,
                 'expired_subscriptions': expired_subscriptions,
                 'cancelled_subscriptions': cancelled_subscriptions,
+                'total_revenue': float(total_revenue),
+                'current_month_subscriptions': current_month_subs,
+                'last_month_subscriptions': last_month_subs,
+                'growth_rate': round(growth_rate, 2),
+                'churn_rate': round(churn_rate, 2),
                 'plan_statistics': plan_stats,
-                'billing_cycle_statistics': billing_cycle_stats
+                'billing_cycle_statistics': billing_cycle_stats,
+                'top_plans': top_plans
             }
         })
-
 
 # ====================== DONOR IMPORT/EXPORT ======================
 
@@ -2763,9 +2816,6 @@ def trigger_donor_embedding_on_create(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_checkout_session(request):
-    """
-    Creates a Stripe Checkout Session to subscribe a parent to a plan.
-    """
     user = request.user
     if user.user_type != 'parent':
         return Response({"error": "Only parents can subscribe to plans."}, status=status.HTTP_403_FORBIDDEN)
@@ -2775,6 +2825,17 @@ def create_checkout_session(request):
         plan = SubscriptionPlan.objects.get(id=plan_id)
         if not plan.stripe_price_id:
             return Response({"error": "This plan is not configured for payment."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check if user already has an active subscription
+        existing_subscription = UserSubscription.objects.filter(
+            user=user,
+            status='active'
+        ).first()
+        
+        if existing_subscription:
+            return Response({
+                "error": "You already have an active subscription. Please cancel it first."
+            }, status=status.HTTP_400_BAD_REQUEST)
 
         # Get or create a Stripe Customer for the user
         customer_id = create_stripe_customer(user)
@@ -2786,14 +2847,28 @@ def create_checkout_session(request):
             mode='subscription',
             success_url=settings.STRIPE_REDIRECT_DOMAIN + '/payment-success?session_id={CHECKOUT_SESSION_ID}',
             cancel_url=settings.STRIPE_REDIRECT_DOMAIN + '/payment-cancelled',
-            metadata={'user_id': str(user.id), 'plan_id': str(plan.id)}
+            metadata={
+                'user_id': str(user.id), 
+                'plan_id': str(plan.id),
+                'user_email': user.email,
+                'plan_name': plan.name,
+                'billing_cycle': plan.billing_cycle
+            }
         )
-        return Response({'sessionId': checkout_session.id, 'url': checkout_session.url})
+        
+        return Response({
+            'sessionId': checkout_session.id, 
+            'url': checkout_session.url,
+            'plan_name': plan.get_name_display(),
+            'plan_price': str(plan.price),
+            'billing_cycle': plan.get_billing_cycle_display()
+        })
 
     except SubscriptionPlan.DoesNotExist:
         return Response({"error": "Subscription plan not found."}, status=status.HTTP_404_NOT_FOUND)
     except Exception as e:
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        print(f"Error creating checkout session: {e}")
+        return Response({'error': 'Failed to create checkout session'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @swagger_auto_schema(
@@ -2821,13 +2896,9 @@ def create_customer_portal_session(request):
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 @csrf_exempt
 @api_view(['POST'])
 def stripe_webhook(request):
-    """
-    Handles incoming webhooks from Stripe to update subscription statuses.
-    """
     payload = request.body
     sig_header = request.META.get('HTTP_STRIPE_SIGNATURE')
     event = None
@@ -2837,11 +2908,13 @@ def stripe_webhook(request):
             payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
         )
     except ValueError as e:
-        # Invalid payload
+        print(f"Invalid payload: {e}")
         return Response(status=status.HTTP_400_BAD_REQUEST)
     except stripe.error.SignatureVerificationError as e:
-        # Invalid signature
+        print(f"Invalid signature: {e}")
         return Response(status=status.HTTP_400_BAD_REQUEST)
+
+    print(f"Received webhook event: {event['type']}")
 
     # Handle the checkout.session.completed event
     if event['type'] == 'checkout.session.completed':
@@ -2855,60 +2928,151 @@ def stripe_webhook(request):
             user = User.objects.get(id=user_id)
             plan = SubscriptionPlan.objects.get(id=plan_id)
 
-            # Create or update the ParentSubscription record
-            UserSubscription.objects.update_or_create(
+            # Get subscription details from Stripe
+            stripe_subscription = stripe.Subscription.retrieve(stripe_subscription_id)
+            
+            # Calculate end date based on current period
+            start_date = timezone.make_aware(datetime.fromtimestamp(stripe_subscription.current_period_start))
+            end_date = timezone.make_aware(datetime.fromtimestamp(stripe_subscription.current_period_end))
+
+            # Create or update the UserSubscription record
+            subscription, created = UserSubscription.objects.update_or_create(
                 user=user,
+                stripe_subscription_id=stripe_subscription_id,
                 defaults={
                     'plan': plan,
-                    'stripe_subscription_id': stripe_subscription_id,
                     'status': 'active',
-                    'start_date': timezone.now(),
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'payment_status': 'completed',
+                    'transaction_id': session.get('payment_intent', ''),
                 }
             )
+
+            # Cancel any other active subscriptions for this user
+            UserSubscription.objects.filter(
+                user=user,
+                status='active'
+            ).exclude(id=subscription.id).update(status='cancelled')
 
             # Ensure the user's stripe_customer_id is saved
             if not user.stripe_customer_id:
                 user.stripe_customer_id = stripe_customer_id
-                user.save()
+                user.save(update_fields=['stripe_customer_id'])
+
+            print(f"Subscription {'created' if created else 'updated'} for user {user.email}")
 
         except (User.DoesNotExist, SubscriptionPlan.DoesNotExist) as e:
             print(f"Webhook Error (checkout.session.completed): {e}")
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            print(f"Unexpected error in checkout.session.completed: {e}")
+            return Response(status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     # Handle recurring payment success
-    if event['type'] == 'invoice.paid':
+    elif event['type'] == 'invoice.paid':
         invoice = event['data']['object']
         stripe_subscription_id = invoice.get('subscription')
-        subscription = UserSubscription.objects.filter(stripe_subscription_id=stripe_subscription_id).first()
-        if subscription:
-            stripe_sub = stripe.Subscription.retrieve(stripe_subscription_id)
-            subscription.end_date = timezone.make_aware(
-                datetime.fromtimestamp(stripe_sub.current_period_end)
-            )
-            subscription.status = 'active'
-            subscription.save()
+        
+        if stripe_subscription_id:
+            try:
+                subscription = UserSubscription.objects.get(stripe_subscription_id=stripe_subscription_id)
+                stripe_sub = stripe.Subscription.retrieve(stripe_subscription_id)
+                
+                # Update subscription with new period
+                subscription.end_date = timezone.make_aware(
+                    datetime.fromtimestamp(stripe_sub.current_period_end)
+                )
+                subscription.status = 'active'
+                subscription.payment_status = 'completed'
+                subscription.save()
+                
+                print(f"Subscription renewed for user {subscription.user.email}")
+                
+            except UserSubscription.DoesNotExist:
+                print(f"Subscription not found for stripe_subscription_id: {stripe_subscription_id}")
+            except Exception as e:
+                print(f"Error handling invoice.paid: {e}")
 
     # Handle subscription cancellation
-    if event['type'] == 'customer.subscription.deleted':
+    elif event['type'] == 'customer.subscription.deleted':
         sub_event = event['data']['object']
         stripe_subscription_id = sub_event.get('id')
-        subscription = UserSubscription.objects.filter(stripe_subscription_id=stripe_subscription_id).first()
-        if subscription:
-            subscription.status = 'canceled'
+        
+        try:
+            subscription = UserSubscription.objects.get(stripe_subscription_id=stripe_subscription_id)
+            subscription.status = 'cancelled'
             subscription.save()
+            
+            print(f"Subscription cancelled for user {subscription.user.email}")
+            
+        except UserSubscription.DoesNotExist:
+            print(f"Subscription not found for cancellation: {stripe_subscription_id}")
+        except Exception as e:
+            print(f"Error handling subscription deletion: {e}")
 
-    # Handle other events like 'invoice.payment_failed' as needed
+    # Handle payment failure
+    elif event['type'] == 'invoice.payment_failed':
+        invoice = event['data']['object']
+        stripe_subscription_id = invoice.get('subscription')
+        
+        if stripe_subscription_id:
+            try:
+                subscription = UserSubscription.objects.get(stripe_subscription_id=stripe_subscription_id)
+                subscription.payment_status = 'failed'
+                subscription.save()
+                
+                print(f"Payment failed for user {subscription.user.email}")
+                
+            except UserSubscription.DoesNotExist:
+                print(f"Subscription not found for payment failure: {stripe_subscription_id}")
+            except Exception as e:
+                print(f"Error handling payment failure: {e}")
 
     return Response(status=status.HTTP_200_OK)
 
 def payment_success(request):
+    """Handle successful payment redirect"""
     session_id = request.GET.get('session_id')
-    context = {
-        'session_id': session_id,
-        'message': 'Payment successful! Your subscription is now active.'
-    }
+    
+    try:
+        # Retrieve session from Stripe to get details
+        session = stripe.checkout.Session.retrieve(session_id)
+        user_id = session.get('metadata', {}).get('user_id')
+        plan_id = session.get('metadata', {}).get('plan_id')
+        
+        # Get subscription details
+        subscription = None
+        if user_id and plan_id:
+            try:
+                user = User.objects.get(id=user_id)
+                subscription = UserSubscription.objects.filter(
+                    user=user,
+                    status='active'
+                ).first()
+            except User.DoesNotExist:
+                pass
+        
+        context = {
+            'session_id': session_id,
+            'message': 'Payment successful! Your subscription is now active.',
+            'subscription': subscription,
+            'plan_name': session.get('metadata', {}).get('plan_name', ''),
+            'billing_cycle': session.get('metadata', {}).get('billing_cycle', '')
+        }
+        
+    except Exception as e:
+        print(f"Error retrieving session: {e}")
+        context = {
+            'session_id': session_id,
+            'message': 'Payment successful! Your subscription is now active.',
+            'error': 'Could not retrieve subscription details'
+        }
+    
     return render(request, 'payment_success.html', context)
 
 def payment_cancelled(request):
+    """Handle cancelled payment redirect"""
     context = {
         'message': 'Payment was cancelled. You can try again anytime.'
     }

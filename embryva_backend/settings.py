@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+from celery.schedules import crontab
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -126,8 +127,8 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 CELERY_ENABLE_UTC = True
 
-STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', 'your_stripe_secret_key')
-STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', 'your_stripe_webhook_secret')
+STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
 STRIPE_REDIRECT_DOMAIN = os.getenv('FRONTEND_URL', 'http://ixwiser.com/api/v1') 
 
 CELERY_BEAT_SCHEDULE = {
@@ -144,6 +145,14 @@ CELERY_BEAT_SCHEDULE = {
         'options': {
             'expires': 3500.0,  # Task expires after 3500 seconds
         }
+    },
+    'check-expired-subscriptions': {
+        'task': 'myapp.tasks.check_expired_subscriptions',
+        'schedule': crontab(minute=0, hour=0),  # Run daily at midnight
+    },
+    'sync-stripe-subscriptions': {
+        'task': 'myapp.tasks.sync_stripe_subscriptions',
+        'schedule': crontab(minute=15, hour=0),  # Run daily at 00:15 AM
     },
 }
 

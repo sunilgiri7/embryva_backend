@@ -262,44 +262,40 @@ class SubscriptionPlan(models.Model):
         ('standard', 'Standard'),
         ('pro', 'Pro'),
     )
-    
+
     BILLING_CYCLES = (
         ('month', 'Monthly'),
         ('year', 'Yearly'),
     )
-    
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=50, choices=PLAN_TYPES)
     billing_cycle = models.CharField(max_length=20, choices=BILLING_CYCLES)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     description = models.TextField(blank=True, null=True)
-    features = models.JSONField(default=dict, blank=True)  # Store plan features as JSON
+    features = models.JSONField(default=dict, blank=True)
     is_active = models.BooleanField(default=True)
-
-    stripe_price_id = models.CharField(max_length=255, blank=True, null=True, help_text="The ID of the corresponding price object in Stripe.")
+    stripe_price_id = models.CharField(max_length=255, blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     created_by = models.ForeignKey('User', on_delete=models.SET_NULL, null=True, blank=True)
-    
+
     class Meta:
         db_table = 'subscription_plans'
         unique_together = ('name', 'billing_cycle')
-        
+
     def __str__(self):
         return f"{self.get_name_display()} - {self.get_billing_cycle_display()}"
-    
+
     @property
     def duration_days(self):
         """Returns the duration of the plan in days"""
-        if self.billing_cycle == 'monthly':
+        if self.billing_cycle == 'month':
             return 30
-        elif self.billing_cycle == 'quarterly':
-            return 90  # 3 months
-        elif self.billing_cycle == 'yearly':  # Updated from 'annually'
+        elif self.billing_cycle == 'year':
             return 365
         return 0
-
 
 class UserSubscription(models.Model):
     STATUS_CHOICES = (
@@ -308,51 +304,63 @@ class UserSubscription(models.Model):
         ('expired', 'Expired'),
         ('cancelled', 'Cancelled'),
     )
-    
+
+    PAYMENT_STATUS_CHOICES = (
+        ('pending', 'Pending'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+        ('refunded', 'Refunded'),
+    )
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey('User', on_delete=models.CASCADE, limit_choices_to={'user_type': 'parent'})
     plan = models.ForeignKey(SubscriptionPlan, on_delete=models.CASCADE)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='inactive')
     start_date = models.DateTimeField()
     end_date = models.DateTimeField()
-    payment_status = models.CharField(max_length=20, default='pending')
+    payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='pending')
     transaction_id = models.CharField(max_length=255, blank=True, null=True)
-    stripe_subscription_id = models.CharField(max_length=255, blank=True, null=True, unique=True, help_text="The ID of the subscription in Stripe.")
+    stripe_subscription_id = models.CharField(max_length=255, blank=True, null=True, unique=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         db_table = 'user_subscriptions'
-        
+        indexes = [
+            models.Index(fields=['user', 'status']),
+            models.Index(fields=['stripe_subscription_id']),
+            models.Index(fields=['end_date']),
+        ]
+
     def __str__(self):
         return f"{self.user.get_full_name()} - {self.plan.name}"
-    
+
     @property
     def is_active(self):
         """Check if subscription is currently active"""
         now = timezone.now()
         return self.status == 'active' and self.start_date <= now <= self.end_date
-    
+
     @property
     def days_remaining(self):
         """Get remaining days in subscription"""
         if self.is_active:
             return (self.end_date - timezone.now()).days
         return 0
-    
+
     def activate(self):
         """Activate the subscription"""
         self.status = 'active'
         self.start_date = timezone.now()
         self.end_date = self.start_date + timedelta(days=self.plan.duration_days)
         self.save()
-    
+
     def cancel(self):
         """Cancel the subscription"""
         self.status = 'cancelled'
         self.save()
-    
+
     def renew(self):
         """Renew the subscription"""
         if self.status in ['active', 'expired']:
@@ -360,6 +368,14 @@ class UserSubscription(models.Model):
             self.end_date = self.start_date + timedelta(days=self.plan.duration_days)
             self.status = 'active'
             self.save()
+
+    def check_expiry(self):
+        """Check and update subscription if expired"""
+        if self.status == 'active' and timezone.now() > self.end_date:
+            self.status = 'expired'
+            self.save()
+            return True
+        return False
 
 class PasswordResetOTP(models.Model):
     user        = models.ForeignKey(User, on_delete=models.CASCADE, related_name="password_reset_otps")
