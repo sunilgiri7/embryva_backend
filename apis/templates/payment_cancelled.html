@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Cancelled - IXWiser</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            max-width: 500px;
+            width: 90%;
+        }
+        .cancel-icon {
+            width: 80px;
+            height: 80px;
+            background: #ef4444;
+            border-radius: 50%;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: shake 0.6s ease-in-out;
+        }
+        .cancel-icon svg {
+            width: 40px;
+            height: 40px;
+            color: white;
+        }
+        h1 {
+            color: #1f2937;
+            font-size: 2rem;
+            margin-bottom: 16px;
+        }
+        .message {
+            color: #6b7280;
+            font-size: 1.1rem;
+            margin-bottom: 24px;
+            line-height: 1.6;
+        }
+        .info-box {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            padding: 16px;
+            border-radius: 8px;
+            margin: 20px 0;
+            color: #92400e;
+        }
+        .btn {
+            background: #3b82f6;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin: 10px;
+            transition: background 0.3s ease;
+        }
+        .btn:hover {
+            background: #2563eb;
+        }
+        .btn-primary {
+            background: #10b981;
+        }
+        .btn-primary:hover {
+            background: #059669;
+        }
+        .btn-secondary {
+            background: #6b7280;
+        }
+        .btn-secondary:hover {
+            background: #4b5563;
+        }
+        .features {
+            text-align: left;
+            margin: 20px 0;
+        }
+        .features ul {
+            list-style: none;
+            padding: 0;
+        }
+        .features li {
+            padding: 8px 0;
+            color: #4b5563;
+        }
+        .features li:before {
+            content: "✓";
+            color: #10b981;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            75% { transform: translateX(5px); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="cancel-icon">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+        </div>
+        
+        <h1>Payment Cancelled</h1>
+        
+        <p class="message">
+            Your payment was cancelled. Don't worry - no charges were made to your account.
+        </p>
+        
+        <div class="info-box">
+            <strong>What happened?</strong><br>
+            You cancelled the payment process or closed the payment window. 
+            Your subscription has not been activated.
+        </div>
+        
+        <div class="features">
+            <p><strong>With our subscription, you'll get:</strong></p>
+            <ul>
+                <li>Full access to all premium features</li>
+                <li>Priority customer support</li>
+                <li>Monthly updates and new content</li>
+                <li>Cancel anytime with no hidden fees</li>
+            </ul>
+        </div>
+        
+        <div>
+            <a href="/pricing" class="btn btn-primary">Try Again</a>
+            <a href="/plans" class="btn btn-secondary">View Plans</a>
+        </div>
+        
+        <div style="margin-top: 20px;">
+            <a href="/contact" style="color: #6b7280; text-decoration: none;">
+                Need help? Contact Support
+            </a>
+        </div>
+    </div>
+
+    <script>
+        // Optional: Send cancellation event to analytics
+        // gtag('event', 'subscription_cancel', {
+        //     'event_category': 'payment',
+        //     'event_label': 'checkout_cancelled'
+        // });
+        
+        // Optional: Show exit intent popup after 30 seconds
+        setTimeout(() => {
+            // You can show a discount offer or survey here
+            console.log('User stayed on cancel page for 30 seconds');
+        }, 30000);
+    </script>
+</body>
+</html>

@@ -3565,6 +3565,20 @@ def stripe_webhook(request):
 
     return Response(status=status.HTTP_200_OK)
 
+def payment_success(request):
+    session_id = request.GET.get('session_id')
+    context = {
+        'session_id': session_id,
+        'message': 'Payment successful! Your subscription is now active.'
+    }
+    return render(request, 'payment_success.html', context)
+
+def payment_cancelled(request):
+    context = {
+        'message': 'Payment was cancelled. You can try again anytime.'
+    }
+    return render(request, 'payment_cancelled.html', context)
+
 
 ################################################REFACTORED AI MATCHING AND DONER UPLOAD################################
 class DonorViewSet(viewsets.ModelViewSet):
