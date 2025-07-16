@@ -53,6 +53,7 @@ urlpatterns = [
     path('admin/subscription/subscriptions/<uuid:pk>/activate/', views.UserSubscriptionViewSet.as_view({'post': 'activate'}), name='user-subscriptions-activate'),
     path('admin/subscription/subscriptions/<uuid:pk>/cancel/', views.UserSubscriptionViewSet.as_view({'post': 'cancel'}), name='user-subscriptions-cancel'),
     path('admin/subscription/subscriptions/<uuid:pk>/renew/', views.UserSubscriptionViewSet.as_view({'post': 'renew'}), name='user-subscriptions-renew'),
+    path('admin/subscription/stats/', views.UserSubscriptionViewSet.as_view({'get': 'subscription_stats'}), name='subscription-stats'),
 
     # ======================= STRIPE PAYMENT URLS =======================
     path('payments/create-checkout-session/', views.create_checkout_session, name='create-checkout-session'),
@@ -61,22 +62,15 @@ urlpatterns = [
     path('payment-success/', views.payment_success, name='payment_success'),
     path('payment-cancelled/', views.payment_cancelled, name='payment_cancelled'),
 
-    # Subscription Utilities
-    path('admin/subscription/stats/', views.UserSubscriptionViewSet.as_view({'get': 'subscription_stats'}), name='subscription-stats'),
-
-    # ====================== PUBLIC APPOINTMENT ENDPOINTS ======================
-    # Public endpoint for creating appointments (donor form submission)
-    path('appointments/create/', views.create_appointment, name='create_appointment'),
-    
     # Public endpoint to get list of clinics for appointment booking
     path('clinics/list/', views.clinic_list_for_appointments, name='clinic_list_for_appointments'),
     
     # ====================== APPOINTMENT MANAGEMENT (ADMIN/SUBADMIN) ======================
-    # Appointment management endpoints for admin dashboard
     path('admin/appointments/', views.appointment_list, name='appointment_list'),
     path('admin/appointments/<uuid:appointment_id>/', views.appointment_detail, name='appointment_detail'),
     path('admin/appointments/<uuid:appointment_id>/update/', views.appointment_update, name='appointment_update'),
     path('admin/appointments/<uuid:appointment_id>/delete/', views.appointment_delete, name='appointment_delete'),
+    path('appointments/create/', views.create_appointment, name='create_appointment'),
     
     # ====================== MEETING MANAGEMENT (ADMIN/SUBADMIN) ======================
     # Meeting creation and management
@@ -88,8 +82,6 @@ urlpatterns = [
     
     # Meeting status management
     path('admin/meetings/<uuid:meeting_id>/status/<str:new_status>/', views.meeting_status_update, name='meeting_status_update'),
-    
-    # Send meeting reminders manually
     path('admin/meetings/<uuid:meeting_id>/send-reminders/', views.send_meeting_reminders, name='send_meeting_reminders'),
     
     # ====================== DASHBOARD STATISTICS ======================
@@ -102,31 +94,14 @@ urlpatterns = [
     path('auth/change-password/', views.change_password, name='change-password'),
 
     ###################################### Donor Management ######################################
-    # Import donors from File
-    path(
-        'donors/',
-        views.DonorViewSet.as_view({'get': 'list', 'post': 'create'}),
-        name='donor-list-create'
-    ),
-    
+    path('donors/', views.DonorViewSet.as_view({'get': 'list', 'post': 'create'}), name='donor-list-create'),
     # Handles retrieve (GET), update (PUT/PATCH), and delete (DELETE) for a single donor
-    path(
-        'clinic/donors/<str:donor_id>/',
-        views.DonorViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}),
-        name='donor-detail-update-delete'
-    ),
+    path('clinic/donors/<str:donor_id>/', views.DonorViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}), name='donor-detail-update-delete'),
     path('donors/import/', views.import_donors_view, name='donor-import'),
     path('donors/find-matches/', views.find_matching_donors_view, name='donor-find-matches'),
-
     path('donors/template/download/', views.download_donor_template, name='download_donor_template'),
     path('donors/import/preview/', views.preview_donor_import, name='preview_donor_import'),
-    # path('donors/import/', views.import_donors, name='import_donors'),
-    # path('donors/', views.view_donors, name='view_donors'),
-    # path('donors/<str:donor_id>/detail/', views.get_donor_detail, name='get_donor_detail'),
-    # path('donors/<str:donor_id>/delete/', views.delete_donor, name='delete_donor'),
     path('donors/bulk-delete/', views.bulk_delete_donors, name='bulk_delete_donors'),
-    # path('donors/<str:donor_id>/update/', views.update_donor, name='update_donor'),
-    # path('donors/<str:donor_id>/partial-update/', views.partial_update_donor, name='partial_update_donor'),
     path('donors/statistics/', views.donor_statistics, name='donor_statistics'),
 
     # Fertility Profile URLs
@@ -134,10 +109,5 @@ urlpatterns = [
     path('fertility-profile/<str:donor_type_preference>/update/', views.update_fertility_profile, name='update_fertility_profile'),
     path('fertility-profile/list/', views.get_fertility_profiles, name='get_fertility_profiles'),
     
-    # Matching URLs
-    # path('donors/find-matches/', views.find_matching_donors, name='find_matching_donors'),
-    
-    # Admin/Clinic URLs
-    # path('donors/generate-embeddings/', views.generate_donor_embeddings, name='generate_donor_embeddings'),
     # path('donors/trigger-embedding/', views.trigger_donor_embedding_on_create, name='trigger_donor_embedding'),
 ]

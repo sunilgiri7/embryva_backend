@@ -837,32 +837,6 @@ class DonorUpdateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Donor age cannot exceed 65 years")
         return value
 
-
-class DonorListSerializer(serializers.ModelSerializer):
-    """Lightweight serializer for donor listing"""
-    clinic_name = serializers.CharField(source='clinic.get_full_name', read_only=True)
-    age = serializers.ReadOnlyField()
-    full_name = serializers.ReadOnlyField()
-    primary_image = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = Donor
-        fields = [
-            'id', 'donor_id', 'full_name', 'age', 'gender', 'donor_type',
-            'availability_status', 'blood_group', 'location', 'education_level',
-            'occupation', 'ai_matching_score', 'clinic_name', 'created_at',
-            'primary_image', 'is_active'
-        ]
-    
-    def get_primary_image(self, obj):
-        primary_image = obj.images.filter(is_primary=True).first()
-        if primary_image:
-            return primary_image.image.url
-        elif obj.profile_image:
-            return obj.profile_image.url
-        return None
-
-
 class DonorImportSerializer(serializers.Serializer):
     """Serializer for importing donor data from files"""
     file = serializers.FileField()
@@ -1082,19 +1056,6 @@ class FertilityProfileSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         validated_data['parent'] = request.user
         return super().create(validated_data)
-
-class DonorListSerializer(serializers.ModelSerializer):
-    """Serializer for listing donors with basic information"""
-    age = serializers.ReadOnlyField()
-    full_name = serializers.ReadOnlyField()
-    
-    class Meta:
-        model = Donor
-        fields = [
-            'id', 'donor_id', 'full_name', 'age', 'gender', 'donor_type',
-            'availability_status', 'blood_group', 'location', 'education_level',
-            'ethnicity', 'height', 'weight', 'created_at', 'updated_at'
-        ]
 
 class DonorDetailSerializer(serializers.ModelSerializer):
     """Serializer for detailed donor information"""

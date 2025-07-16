@@ -103,27 +103,6 @@ def send_verification_email(user, request=None):
     except Exception as e:
         print(f"Failed to send verification email: {e}")
         return False
-    
-def require_permission(section):
-    """Decorator to check if user has permission for a specific section"""
-    def decorator(view_func):
-        @wraps(view_func)
-        def wrapper(request, *args, **kwargs):
-            if not request.user.is_authenticated:
-                return Response(
-                    {"detail": "Authentication required."},
-                    status=status.HTTP_401_UNAUTHORIZED,
-                )
-            
-            if not request.user.has_permission(section):
-                return Response(
-                    {"detail": f"You don't have permission to access {section} section."},
-                    status=status.HTTP_403_FORBIDDEN,
-                )
-            
-            return view_func(request, *args, **kwargs)
-        return wrapper
-    return decorator
 
 class CustomPageNumberPagination(PageNumberPagination):
     page_size = 10
