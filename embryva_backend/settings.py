@@ -11,11 +11,11 @@ AUTH_USER_MODEL = 'apis.User'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-FRONTEND_PASSWORD_RESET_URL = 'http://embryva-backend.onrender.com'
+FRONTEND_PASSWORD_RESET_URL = 'http://ixwiser.com'
 
 # CORS Configuration (if you need it for frontend)
 CORS_ALLOWED_ORIGINS = [
-    "http://embryva-backend.onrender.com",  # Add your frontend URL
+    "http://ixwiser.com", 
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3000",
     "http://192.168.183.152:3000"

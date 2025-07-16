@@ -101,15 +101,30 @@ urlpatterns = [
 
     ###################################### Donor Management ######################################
     # Import donors from File
+    path(
+        'donors/',
+        views.DonorViewSet.as_view({'get': 'list', 'post': 'create'}),
+        name='donor-list-create'
+    ),
+    
+    # Handles retrieve (GET), update (PUT/PATCH), and delete (DELETE) for a single donor
+    path(
+        'clinic/donors/<str:donor_id>/',
+        views.DonorViewSet.as_view({'get': 'retrieve', 'put': 'update', 'patch': 'partial_update', 'delete': 'destroy'}),
+        name='donor-detail-update-delete'
+    ),
+    path('donors/import/', views.import_donors_view, name='donor-import'),
+    path('donors/find-matches/', views.find_matching_donors_view, name='donor-find-matches'),
+
     path('donors/template/download/', views.download_donor_template, name='download_donor_template'),
     path('donors/import/preview/', views.preview_donor_import, name='preview_donor_import'),
-    path('donors/import/', views.import_donors, name='import_donors'),
-    path('donors/', views.view_donors, name='view_donors'),
-    path('donors/<str:donor_id>/detail/', views.get_donor_detail, name='get_donor_detail'),
-    path('donors/<str:donor_id>/delete/', views.delete_donor, name='delete_donor'),
+    # path('donors/import/', views.import_donors, name='import_donors'),
+    # path('donors/', views.view_donors, name='view_donors'),
+    # path('donors/<str:donor_id>/detail/', views.get_donor_detail, name='get_donor_detail'),
+    # path('donors/<str:donor_id>/delete/', views.delete_donor, name='delete_donor'),
     path('donors/bulk-delete/', views.bulk_delete_donors, name='bulk_delete_donors'),
-    path('donors/<str:donor_id>/update/', views.update_donor, name='update_donor'),
-    path('donors/<str:donor_id>/partial-update/', views.partial_update_donor, name='partial_update_donor'),
+    # path('donors/<str:donor_id>/update/', views.update_donor, name='update_donor'),
+    # path('donors/<str:donor_id>/partial-update/', views.partial_update_donor, name='partial_update_donor'),
     path('donors/statistics/', views.donor_statistics, name='donor_statistics'),
 
     # Fertility Profile URLs
@@ -118,9 +133,9 @@ urlpatterns = [
     path('fertility-profile/list/', views.get_fertility_profiles, name='get_fertility_profiles'),
     
     # Matching URLs
-    path('donors/find-matches/', views.find_matching_donors, name='find_matching_donors'),
+    # path('donors/find-matches/', views.find_matching_donors, name='find_matching_donors'),
     
     # Admin/Clinic URLs
-    path('donors/generate-embeddings/', views.generate_donor_embeddings, name='generate_donor_embeddings'),
-    path('donors/trigger-embedding/', views.trigger_donor_embedding_on_create, name='trigger_donor_embedding'),
+    # path('donors/generate-embeddings/', views.generate_donor_embeddings, name='generate_donor_embeddings'),
+    # path('donors/trigger-embedding/', views.trigger_donor_embedding_on_create, name='trigger_donor_embedding'),
 ]

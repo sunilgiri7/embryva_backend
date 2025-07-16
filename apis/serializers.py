@@ -1045,6 +1045,7 @@ class DonorUpdateSerializer(serializers.ModelSerializer):
         ]
         
         needs_embedding_update = any(field in validated_data for field in embedding_important_fields)
+        print(f"Embedding update needed: {needs_embedding_update}")
         
         # Update the instance
         for attr, value in validated_data.items():

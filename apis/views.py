@@ -15,6 +15,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 import urllib
 from apis.email_service import EmailService
+from apis.services.donor_service import DonorImportService, DonorMatchingService
 from apis.services.embeddingsMatching import DonorMatchingEngine, EmbeddingService, MatchResult
 from apis.services.signals import generate_and_store_embedding
 from apis.services.stripe_service import create_stripe_customer
@@ -3563,3 +3564,203 @@ def stripe_webhook(request):
     # Handle other events like 'invoice.payment_failed' as needed
 
     return Response(status=status.HTTP_200_OK)
+
+
+################################################REFACTORED AI MATCHING AND DONER UPLOAD################################
+class DonorViewSet(viewsets.ModelViewSet):
+    serializer_class = DonorDetailSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    lookup_field = 'donor_id'
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_clinic:
+            return Donor.objects.filter(clinic=user, is_active=True).order_by('-created_at')
+        return Donor.objects.none()
+
+    def get_serializer_class(self):
+        if self.action in ['create', 'update', 'partial_update']:
+            return DonorUpdateSerializer
+        return DonorDetailSerializer
+
+    def create(self, request, *args, **kwargs):
+        # We must inject the clinic and created_by from the request user
+        request.data['clinic'] = request.user.id
+        request.data['created_by'] = request.user.id
+        
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        
+        # After creation, serialize with the detail serializer for the response
+        response_data = DonorDetailSerializer(serializer.instance).data
+        
+        headers = self.get_success_headers(response_data)
+        return Response({
+            "success": True,
+            "message": "Donor profile created successfully.",
+            "data": response_data
+        }, status=status.HTTP_201_CREATED, headers=headers)
+
+    def list(self, request, *args, **kwargs):
+        user = request.user
+        if not user.is_clinic:
+            return Response({"success": False, "message": "Only clinics can view donors."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            # Get base queryset
+            queryset = Donor.objects.filter(clinic=user, is_active=True)
+
+            # Apply search filter
+            search = request.GET.get('search', '').strip()
+            if search:
+                queryset = queryset.filter(
+                    Q(first_name__icontains=search) |
+                    Q(last_name__icontains=search) |
+                    Q(donor_id__icontains=search) |
+                    Q(location__icontains=search)
+                )
+
+            # Apply additional filters
+            donor_type = request.GET.get('donor_type')
+            if donor_type:
+                queryset = queryset.filter(donor_type=donor_type)
+
+            availability_status = request.GET.get('availability_status')
+            if availability_status:
+                queryset = queryset.filter(availability_status=availability_status)
+
+            gender = request.GET.get('gender')
+            if gender:
+                queryset = queryset.filter(gender=gender)
+
+            blood_group = request.GET.get('blood_group')
+            if blood_group:
+                queryset = queryset.filter(blood_group=blood_group)
+
+            # Apply ordering
+            ordering = request.GET.get('ordering', '-created_at')
+            valid_ordering_fields = [
+                'created_at', '-created_at', 'updated_at', '-updated_at',
+                'first_name', '-first_name', 'last_name', '-last_name',
+                'donor_id', '-donor_id', 'age', '-age', 'donor_type', '-donor_type'
+            ]
+            if ordering in valid_ordering_fields:
+                if ordering in ['age', '-age']:
+                    ordering = '-date_of_birth' if ordering == 'age' else 'date_of_birth'
+                queryset = queryset.order_by(ordering)
+
+            # Pagination
+            page = request.GET.get('page', 1)
+            page_size = min(int(request.GET.get('page_size', 20)), 100)  # Cap at 100
+            paginator = Paginator(queryset, page_size)
+            page_obj = paginator.get_page(page)
+
+            serializer = self.get_serializer(page_obj, many=True)
+
+            return Response({
+                'success': True,
+                'message': "Donors retrieved successfully.",
+                'data': serializer.data,
+                'pagination': {
+                    'current_page': page_obj.number,
+                    'total_pages': paginator.num_pages,
+                    'total_items': paginator.count,
+                    'page_size': page_size,
+                    'has_next': page_obj.has_next(),
+                    'has_previous': page_obj.has_previous(),
+                },
+                'filters_applied': {
+                    'search': search,
+                    'donor_type': donor_type,
+                    'availability_status': availability_status,
+                    'gender': gender,
+                    'blood_group': blood_group,
+                    'ordering': ordering
+                }
+            })
+
+        except Exception as e:
+            logger.error(f"Error in DonorViewSet.list: {str(e)}")
+            return Response({
+                'success': False,
+                'message': f"An error occurred while fetching donors: {str(e)}"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        return Response({
+            "success": True,
+            "message": "Donor details retrieved successfully.",
+            "data": response.data
+        })
+
+    def perform_update(self, serializer):
+        updated_fields = list(serializer.validated_data.keys())
+        if 'updated_at' not in updated_fields:
+            updated_fields.append('updated_at')
+        serializer.save(update_fields=updated_fields)
+
+    def update(self, request, *args, **kwargs):
+        response = super().update(request, *args, **kwargs)
+        return Response({
+            "success": True,
+            "message": "Donor profile updated successfully.",
+            "data": response.data
+        })
+
+    def partial_update(self, request, *args, **kwargs):
+        response = super().partial_update(request, *args, **kwargs)
+        return Response({
+            "success": True,
+            "message": "Donor profile partially updated successfully.",
+            "data": response.data
+        })
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        donor_id_for_message = instance.donor_id
+        
+        # The pre_delete signal will fire here, triggering the Pinecone deletion.
+        self.perform_destroy(instance)
+        
+        return Response({
+            "success": True,
+            "message": f"Donor {donor_id_for_message} and all associated data have been successfully deleted."
+        }, status=status.HTTP_200_OK)
+    
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
+def import_donors_view(request):
+    """Import donor data from a file - Clinic only."""
+    if not request.user.is_clinic:
+        return Response({"detail": "Only clinics can import donors."}, status=status.HTTP_403_FORBIDDEN)
+
+    serializer = DonorImportSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response({'success': False, 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+    service = DonorImportService(file=serializer.validated_data['file'], clinic_user=request.user)
+    result = service.process_import()
+    
+    return Response(result, status=result.get('status', 200))
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def find_matching_donors_view(request):
+    if not request.user.is_parent:
+        return Response({"detail": "Only parents can search for matches."}, status=status.HTTP_403_FORBIDDEN)
+
+    profile_id = request.data.get('profile_id')
+    try:
+        profile = FertilityProfile.objects.get(id=profile_id, parent=request.user)
+        service = DonorMatchingService(fertility_profile=profile)
+        result = service.find_matches()
+        return Response(result)
+    except FertilityProfile.DoesNotExist:
+        return Response({'success': False, 'message': 'Profile not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error in find_matching_donors_view: {e}", exc_info=True)
+        return Response({'success': False, 'message': 'An unexpected error occurred.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
