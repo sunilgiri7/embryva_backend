@@ -128,7 +128,7 @@ CELERY_ENABLE_UTC = True
 
 STRIPE_SECRET_KEY = os.getenv('STRIPE_SECRET_KEY', 'your_stripe_secret_key')
 STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET', 'your_stripe_webhook_secret')
-STRIPE_REDIRECT_DOMAIN = os.getenv('FRONTEND_URL', 'http://0.0.0.0:8080') 
+STRIPE_REDIRECT_DOMAIN = os.getenv('FRONTEND_URL', 'http://ixwiser.com') 
 
 CELERY_BEAT_SCHEDULE = {
     'send-meeting-reminder-emails': {
