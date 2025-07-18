@@ -203,7 +203,8 @@ class DonorMatchingService:
                     match_score=final_score,
                     matched_attributes=matched_attrs,
                     ai_explanation=ai_explanation,
-                    compatibility_scores=compat_scores
+                    compatibility_scores=compat_scores,
+                    donor_type=donor.donor_type
                 ))
 
             except Exception as e:
@@ -238,7 +239,8 @@ class DonorMatchingService:
                     'educational': round(match.compatibility_scores.get('educational', 0), 1),
                     'demographic': round(match.compatibility_scores.get('demographic', 0), 1),
                     'medical': round(match.compatibility_scores.get('medical', 0), 1),
-                }
+                },
+                'donor_type': match.donor_type
             })
             
         return formatted_matches

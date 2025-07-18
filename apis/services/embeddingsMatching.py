@@ -305,6 +305,7 @@ class MatchResult:
     matched_attributes: Dict[str, Any]
     ai_explanation: str
     compatibility_scores: Dict[str, float]
+    donor_type: str
 
 
 class DonorMatchingEngine:
