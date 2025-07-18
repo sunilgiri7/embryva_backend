@@ -47,8 +47,6 @@ class RealtimeMatchingConsumer(AsyncWebsocketConsumer):
         """Handle WebSocket disconnection"""
         if hasattr(self, 'group_name'):
             await self.channel_layer.group_discard(self.group_name, self.channel_name)
-        
-        logger.info(f"User {getattr(self, 'user', {}).get('id', 'unknown')} disconnected from real-time matching")
 
     async def receive(self, text_data):
         """Handle incoming WebSocket messages"""
