@@ -682,11 +682,12 @@ class MeetingUpdateSerializer(serializers.ModelSerializer):
     
 class SubscriptionPlanSerializer(serializers.ModelSerializer):
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    subscription_type = serializers.CharField(source='name', help_text="Subscription type: sperm, egg, or embryo")
     
     class Meta:
         model = SubscriptionPlan
         fields = [
-            'id', 'name', 'billing_cycle', 'price', 'description', 
+            'id', 'subscription_type', 'billing_cycle', 'price', 'description', 
             'features', 'is_active', 'created_at', 'updated_at', 
             'created_by', 'created_by_name', 'duration_days'
         ]
@@ -697,6 +698,16 @@ class SubscriptionPlanSerializer(serializers.ModelSerializer):
         if request and hasattr(request, 'user'):
             validated_data['created_by'] = request.user
         return super().create(validated_data)
+
+    def validate_subscription_type(self, value):
+        """Validate that subscription_type is one of the DONOR_TYPES"""
+        from .models import Donor  # Import your Donor model
+        valid_types = [choice[0] for choice in Donor.DONOR_TYPES]
+        if value not in valid_types:
+            raise serializers.ValidationError(
+                f"Invalid subscription type. Must be one of: {', '.join(valid_types)}"
+            )
+        return value
 
 
 class SubscriptionPlanUpdateSerializer(serializers.ModelSerializer):

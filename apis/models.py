@@ -418,7 +418,7 @@ class Donor(models.Model):
     DONOR_TYPES = (
         ('sperm', 'Sperm Donor'),
         ('egg', 'Egg Donor'),
-        ('embryo', 'Embryo Donor'),
+        ('surrogate', 'Surrogate Donor'),
     )
     
     AVAILABILITY_STATUS = (
@@ -568,7 +568,7 @@ class Donor(models.Model):
             donor_type_prefix = {
                 'sperm': 'SP',
                 'egg': 'EG',
-                'embryo': 'EM'
+                'surrogate': 'su'
             }.get(self.donor_type, 'DN')
             
             # Generate unique donor ID

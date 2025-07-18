@@ -125,7 +125,7 @@ def generate_unique_donor_id(donor_type: str, existing_ids: Set[str]) -> str:
     donor_type_prefix = {
         'sperm': 'SP',
         'egg': 'EG',
-        'embryo': 'EM'
+        'surrogate': 'su'
     }.get(str(donor_type).lower(), 'DN')  # Default prefix 'DN'
 
     # Loop to ensure the generated ID is unique
