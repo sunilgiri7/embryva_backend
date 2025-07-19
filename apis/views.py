@@ -39,6 +39,7 @@ from django.core.paginator import Paginator
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view, permission_classes, parser_classes
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework import filters
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -3277,3 +3278,105 @@ def find_matching_donors_view(request):
     except Exception as e:
         logger.error(f"Error in find_matching_donors_view: {e}", exc_info=True)
         return Response({'success': False, 'message': 'An unexpected error occurred.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def contact_us_view(request):
+    serializer = ContactUsSerializer(data=request.data)
+    if serializer.is_valid():
+        serializer.save()
+        return Response({
+            "message": "Your query has been submitted successfully."
+        }, status=status.HTTP_201_CREATED)
+    return Response({
+        "error": serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
+    
+class AdminBlogViewSet(viewsets.ModelViewSet):
+    """
+    Admin CRUD operations for blogs
+    """
+    queryset = BlogMaster.objects.all()
+    serializer_class = BlogSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['status', 'is_featured', 'created_by']
+    search_fields = ['title', 'content', 'excerpt']
+    ordering_fields = ['created_at', 'updated_at', 'published_at', 'view_count']
+    ordering = ['-created_at']
+    
+    def get_queryset(self):
+        user = self.request.user
+        queryset = BlogMaster.objects.all()
+        # If subadmin, only show their own blogs
+        if not (user.user_type in ['admin', 'subadmin']):
+            return User.objects.none()
+        return queryset
+    
+    @action(detail=True, methods=['post'])
+    def publish(self, request, pk=None):
+        """Publish a blog post"""
+        blog = self.get_object()
+        blog.status = 'published'
+        blog.save()
+        return Response({'status': 'Blog published successfully'})
+    
+    @action(detail=True, methods=['post'])
+    def unpublish(self, request, pk=None):
+        """Unpublish a blog post"""
+        blog = self.get_object()
+        blog.status = 'draft'
+        blog.save()
+        return Response({'status': 'Blog unpublished successfully'})
+    
+    @action(detail=True, methods=['post'])
+    def feature(self, request, pk=None):
+        """Feature/unfeature a blog post"""
+        blog = self.get_object()
+        blog.is_featured = not blog.is_featured
+        blog.save()
+        status_text = 'featured' if blog.is_featured else 'unfeatured'
+        return Response({'status': f'Blog {status_text} successfully'})
+
+
+class PublicBlogViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Public API to view published blogs
+    """
+    queryset = BlogMaster.objects.filter(status='published')
+    serializer_class = PublicBlogSerializer
+    permission_classes = [AllowAny]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['is_featured']
+    search_fields = ['title', 'content', 'excerpt']
+    ordering_fields = ['published_at', 'view_count']
+    ordering = ['-published_at']
+    
+    def retrieve(self, request, *args, **kwargs):
+        """Override retrieve to increment view count"""
+        instance = self.get_object()
+        # Increment view count
+        BlogMaster.objects.filter(pk=instance.pk).update(view_count=instance.view_count + 1)
+        # Refresh instance to get updated view count
+        instance.refresh_from_db()
+        serializer = self.get_serializer(instance)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def featured(self, request):
+        """Get featured blogs"""
+        featured_blogs = self.get_queryset().filter(is_featured=True)
+        page = self.paginate_queryset(featured_blogs)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        serializer = self.get_serializer(featured_blogs, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['get'])
+    def recent(self, request):
+        """Get recent blogs (last 10)"""
+        recent_blogs = self.get_queryset()[:10]
+        serializer = self.get_serializer(recent_blogs, many=True)
+        return Response(serializer.data)

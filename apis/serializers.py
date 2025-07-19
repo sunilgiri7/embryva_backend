@@ -7,7 +7,7 @@ from django.contrib.auth.password_validation import validate_password
 from rest_framework.authentication import _
 from django.contrib.auth import password_validation
 from apis.utils import send_verification_email
-from .models import Appointment, Donor, DonorDocument, DonorImage, FertilityProfile, Meeting, PasswordResetOTP, SubscriptionPlan, User, UserSubscription
+from .models import Appointment, BlogMaster, ContactUs, Donor, DonorDocument, DonorImage, FertilityProfile, Meeting, PasswordResetOTP, SubscriptionPlan, User, UserSubscription
 from django.conf import settings
 from django.core.mail import send_mail
 from django.contrib.auth import get_user_model
@@ -1095,3 +1095,50 @@ class DonorBulkDeleteSerializer(serializers.Serializer):
             raise serializers.ValidationError("Duplicate donor IDs found")
         
         return unique_ids
+    
+class ContactUsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ContactUs
+        fields = ['id', 'name', 'email', 'question', 'submitted_at']
+        read_only_fields = ['id', 'submitted_at']
+
+class BlogSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    created_by_email = serializers.CharField(source='created_by.email', read_only=True)
+    
+    class Meta:
+        model = BlogMaster
+        fields = [
+            'id', 'title', 'slug', 'content', 'excerpt', 'featured_image',
+            'status', 'is_featured', 'meta_title', 'meta_description',
+            'created_by', 'created_by_name', 'created_by_email',
+            'created_at', 'updated_at', 'published_at', 'view_count'
+        ]
+        read_only_fields = ['id', 'created_by', 'created_at', 'updated_at', 'view_count']
+    
+    def create(self, validated_data):
+        # Set the created_by to the current user
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
+    
+    def validate_slug(self, value):
+        if value:
+            # Check if slug already exists (excluding current instance for updates)
+            queryset = BlogMaster.objects.filter(slug=value)
+            if self.instance:
+                queryset = queryset.exclude(pk=self.instance.pk)
+            if queryset.exists():
+                raise serializers.ValidationError("A blog with this slug already exists.")
+        return value
+
+
+class PublicBlogSerializer(serializers.ModelSerializer):
+    """Serializer for public blog display with limited fields"""
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    
+    class Meta:
+        model = BlogMaster
+        fields = [
+            'id', 'title', 'slug', 'content', 'excerpt', 'featured_image',
+            'is_featured', 'created_by_name', 'published_at', 'view_count'
+        ]

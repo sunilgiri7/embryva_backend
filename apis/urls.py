@@ -1,6 +1,11 @@
-from django.urls import path
+from django.urls import include, path
 from rest_framework_simplejwt.views import TokenRefreshView
 from . import views
+from rest_framework.routers import DefaultRouter
+
+router = DefaultRouter()
+router.register(r'admin/blogs', views.AdminBlogViewSet, basename='admin-blogs')
+router.register(r'blogs', views.PublicBlogViewSet, basename='public-blogs')
 
 urlpatterns = [
     # ================ Admin/Parent AUTHENTICATION ================
@@ -110,4 +115,6 @@ urlpatterns = [
     path('fertility-profile/list/', views.get_fertility_profiles, name='get_fertility_profiles'),
     
     # path('donors/trigger-embedding/', views.trigger_donor_embedding_on_create, name='trigger_donor_embedding'),
+    path('contact-us/', views.contact_us_view, name='contact-us'),
+    path('', include(router.urls))
 ]

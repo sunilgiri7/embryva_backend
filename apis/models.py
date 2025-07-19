@@ -800,3 +800,60 @@ class MatchingResult(models.Model):
     class Meta:
         db_table = 'matching_results'
         unique_together = ['fertility_profile', 'donor_id']
+
+class ContactUs(models.Model):
+    name = models.CharField(max_length=255)
+    email = models.EmailField()
+    question = models.TextField()
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.name} ({self.email})"
+    
+class BlogMaster(models.Model):
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('published', 'Published'),
+        ('archived', 'Archived'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    title = models.CharField(max_length=255)
+    slug = models.SlugField(max_length=255, unique=True, blank=True)
+    content = models.TextField()
+    excerpt = models.TextField(max_length=500, blank=True, null=True, help_text="Brief description of the blog post")
+    featured_image = models.ImageField(upload_to='blog_images/', blank=True, null=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    is_featured = models.BooleanField(default=False, help_text="Feature this blog on homepage")
+    
+    # SEO fields
+    meta_title = models.CharField(max_length=60, blank=True, null=True)
+    meta_description = models.CharField(max_length=160, blank=True, null=True)
+    
+    # Author and timestamps
+    created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='blogs')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    published_at = models.DateTimeField(null=True, blank=True)
+    
+    # Analytics
+    view_count = models.PositiveIntegerField(default=0)
+    
+    class Meta:
+        db_table = 'blogs'
+        ordering = ['-created_at']
+        
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            from django.utils.text import slugify
+            self.slug = slugify(self.title)
+            
+        if self.status == 'published' and not self.published_at:
+            self.published_at = timezone.now()
+        elif self.status != 'published':
+            self.published_at = None
+            
+        super().save(*args, **kwargs)
+    
+    def __str__(self):
+        return self.title
