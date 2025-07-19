@@ -49,7 +49,8 @@ class EmbeddingService:
             try:
                 from torch import device
                 # Use CPU for broader compatibility
-                self.model = SentenceTransformer(self.model_name, device='cpu')
+                self.model = SentenceTransformer(self.model_name)
+                self.model.to('cpu')
                 logger.info(f"Initialized embedding model on CPU: {self.model_name}")
             except Exception as e:
                 logger.error(f"Failed to initialize embedding model: {e}")
