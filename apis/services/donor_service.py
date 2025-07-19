@@ -119,7 +119,7 @@ class DonorMatchingService:
             return {
                 'success': True,
                 'message': f'Found {len(formatted_matches)} high-quality matching donors.',
-                "Total Matches": len(formatted_matches),
+                "total_matches": len(formatted_matches),
                 'matches': formatted_matches
             }
         except Exception as e:
