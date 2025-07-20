@@ -1805,6 +1805,116 @@ def send_meeting_reminders(request, meeting_id):
         'email_sent': email_sent
     })
 
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def clinic_donor_booking_stats(request):
+    if not request.user.is_clinic:
+        return Response({
+            'success': False,
+            'message': 'Access denied. Only clinics can view donor statistics.'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    # Get all donors belonging to this clinic
+    donors = Donor.objects.filter(clinic=request.user, is_active=True)
+    
+    # Apply date filter if provided
+    date_from = request.GET.get('date_from')
+    date_to = request.GET.get('date_to')
+    
+    appointment_filter = Q(clinic=request.user)
+    if date_from:
+        try:
+            date_from = datetime.strptime(date_from, '%Y-%m-%d').date()
+            appointment_filter &= Q(created_at__date__gte=date_from)
+        except ValueError:
+            pass
+    
+    if date_to:
+        try:
+            date_to = datetime.strptime(date_to, '%Y-%m-%d').date()
+            appointment_filter &= Q(created_at__date__lte=date_to)
+        except ValueError:
+            pass
+    
+    # Get donor statistics
+    donor_stats = []
+    for donor in donors:
+        # Get appointments for this donor
+        appointments = Appointment.objects.filter(
+            appointment_filter & Q(donor=donor)
+        )
+        
+        # Get meetings for these appointments
+        meetings = Meeting.objects.filter(appointment__in=appointments)
+        
+        donor_data = {
+            'donor_id': donor.donor_id,
+            'donor_name': donor.full_name,
+            'donor_type': donor.donor_type,
+            'donor_age': donor.age,
+            'total_bookings': appointments.count(),
+            'booking_by_status': {
+                'pending': appointments.filter(status='pending').count(),
+                'confirmed': appointments.filter(status='confirmed').count(),
+                'completed': appointments.filter(status='completed').count(),
+                'cancelled': appointments.filter(status='cancelled').count(),
+            },
+            'total_meetings': meetings.count(),
+            'meeting_by_status': {
+                'scheduled': meetings.filter(status='scheduled').count(),
+                'completed': meetings.filter(status='completed').count(),
+                'cancelled': meetings.filter(status='cancelled').count(),
+                'in_progress': meetings.filter(status='in_progress').count(),
+            },
+            'meeting_by_type': {
+                'instant': meetings.filter(meeting_type='instant').count(),
+                'scheduled': meetings.filter(meeting_type='scheduled').count(),
+            },
+            'latest_booking_date': appointments.order_by('-created_at').first().created_at if appointments.exists() else None,
+            'recent_bookings': appointments.order_by('-created_at')[:3].values(
+                'id', 'name', 'email', 'status', 'created_at', 'reason_for_consultation'
+            )
+        }
+        donor_stats.append(donor_data)
+    
+    # Sort by total bookings (descending)
+    donor_stats.sort(key=lambda x: x['total_bookings'], reverse=True)
+    
+    # Overall clinic statistics
+    total_appointments = Appointment.objects.filter(appointment_filter).count()
+    total_meetings = Meeting.objects.filter(
+        appointment__clinic=request.user
+    ).count()
+    
+    overall_stats = {
+        'total_active_donors': donors.count(),
+        'total_appointments': total_appointments,
+        'total_meetings': total_meetings,
+        'appointments_by_status': {
+            'pending': Appointment.objects.filter(appointment_filter & Q(status='pending')).count(),
+            'confirmed': Appointment.objects.filter(appointment_filter & Q(status='confirmed')).count(),
+            'completed': Appointment.objects.filter(appointment_filter & Q(status='completed')).count(),
+            'cancelled': Appointment.objects.filter(appointment_filter & Q(status='cancelled')).count(),
+        },
+        'appointments_by_consultation': {
+            'sperm': Appointment.objects.filter(appointment_filter & Q(reason_for_consultation='sperm')).count(),
+            'egg': Appointment.objects.filter(appointment_filter & Q(reason_for_consultation='egg')).count(),
+            'surrogate': Appointment.objects.filter(appointment_filter & Q(reason_for_consultation='surrogate')).count(),
+        }
+    }
+    
+    return Response({
+        'success': True,
+        'message': 'Donor statistics retrieved successfully',
+        'overall_stats': overall_stats,
+        'donor_stats': donor_stats,
+        'filters_applied': {
+            'date_from': date_from.isoformat() if date_from else None,
+            'date_to': date_to.isoformat() if date_to else None,
+        }
+    }, status=status.HTTP_200_OK)
+
 # ====================== DASHBOARD STATISTICS ======================
 
 @swagger_auto_schema(
