@@ -647,13 +647,9 @@ class Appointment(models.Model):
     )
     
     CONSULTATION_REASONS = (
-        ('sperm_donor', 'Sperm Donor Consultation'),
-        ('egg_donor', 'Egg Donor Consultation'),
-        ('surrogate', 'Surrogate Consultation'),
-        ('ivf_treatment', 'IVF Treatment'),
-        ('fertility_assessment', 'Fertility Assessment'),
-        ('genetic_counseling', 'Genetic Counseling'),
-        ('other', 'Other'),
+        ('sperm', 'Sperm Donor Consultation'),
+        ('egg', 'Egg Donor Consultation'),
+        ('surrogate', 'Surrogate Consultation')
     )
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

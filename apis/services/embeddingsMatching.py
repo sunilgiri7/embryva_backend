@@ -421,11 +421,11 @@ class DonorMatchingEngine:
         
         # Opening Statement
         if score_percent >= 70:
-            opening = f"This donor is an **excellent match** with an overall compatibility of **{score_percent}%**."
+            opening = f"This donor is an <strong>excellent match</strong> with an overall compatibility of <strong>{score_percent}%</strong>."
         elif score_percent >= 50:
-            opening = f"This donor is a **strong match** with an overall compatibility of **{score_percent}%**."
+            opening = f"This donor is a <strong>strong match</strong> with an overall compatibility of <strong>{score_percent}%</strong>."
         else:
-            opening = f"This donor shows **good potential** with a compatibility score of **{score_percent}%**."
+            opening = f"This donor shows <strong>good potential</strong> with a compatibility score of <strong>{score_percent}%</strong>."
 
         # Strengths of the Match
         strengths = []
