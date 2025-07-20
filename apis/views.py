@@ -3080,32 +3080,6 @@ def create_checkout_session(request):
         print(f"Error creating checkout session: {e}")
         return Response({'error': 'Failed to create checkout session'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
-@swagger_auto_schema(
-    method='post',
-    operation_description="Create a Stripe Customer Portal session for a parent to manage their subscription.",
-    tags=['Payments']
-)
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def create_customer_portal_session(request):
-    """
-    Generates a one-time link for the parent to manage their billing information.
-    """
-    user = request.user
-    if not user.stripe_customer_id:
-         return Response({"error": "User is not a Stripe customer."}, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        print("stripe customer id", user.stripe_customer_id)
-        portal_session = stripe.billing_portal.Session.create(
-            customer=user.stripe_customer_id,
-            return_url=settings.STRIPE_REDIRECT_DOMAIN + '/profile',
-        )
-        return Response({'url': portal_session.url})
-    except Exception as e:
-        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 @csrf_exempt
 @api_view(['POST'])
 def stripe_webhook(request):
@@ -3242,51 +3216,183 @@ def stripe_webhook(request):
     return Response(status=status.HTTP_200_OK)
 
 def payment_success(request):
-    """Handle successful payment redirect"""
+    """Enhanced payment success handler with verification"""
     session_id = request.GET.get('session_id')
     
+    if not session_id:
+        return render(request, 'payment_error.html', {
+            'error': 'Invalid session ID'
+        })
+    
     try:
-        # Retrieve session from Stripe to get details
+        # Retrieve and verify session from Stripe
         session = stripe.checkout.Session.retrieve(session_id)
-        user_id = session.get('metadata', {}).get('user_id')
-        plan_id = session.get('metadata', {}).get('plan_id')
         
-        # Get subscription details
-        subscription = None
-        if user_id and plan_id:
-            try:
-                user = User.objects.get(id=user_id)
-                subscription = UserSubscription.objects.filter(
-                    user=user,
-                    status='active'
-                ).first()
-            except User.DoesNotExist:
-                pass
+        # Verify payment was actually completed
+        if session.payment_status != 'paid':
+            return render(request, 'payment_error.html', {
+                'error': 'Payment not completed'
+            })
+        
+        # Get metadata
+        user_id = session.metadata.get('user_id')
+        plan_id = session.metadata.get('plan_id')
+        stripe_subscription_id = session.get('subscription')
+        
+        if not all([user_id, plan_id]):
+            return render(request, 'payment_error.html', {
+                'error': 'Invalid session metadata'
+            })
+        
+        # Check if we already processed this payment
+        existing_subscription = UserSubscription.objects.filter(
+            stripe_subscription_id=stripe_subscription_id
+        ).first()
+        
+        if not existing_subscription:
+            # Process payment (same logic as webhook)
+            user = User.objects.get(id=user_id)
+            plan = SubscriptionPlan.objects.get(id=plan_id)
+            
+            # Get subscription details from Stripe
+            stripe_subscription = stripe.Subscription.retrieve(stripe_subscription_id)
+            
+            start_date = timezone.make_aware(datetime.fromtimestamp(stripe_subscription.current_period_start))
+            end_date = timezone.make_aware(datetime.fromtimestamp(stripe_subscription.current_period_end))
+            
+            # Create subscription record
+            subscription = UserSubscription.objects.create(
+                user=user,
+                plan=plan,
+                stripe_subscription_id=stripe_subscription_id,
+                status='active',
+                start_date=start_date,
+                end_date=end_date,
+                payment_status='completed',
+                transaction_id=session.get('payment_intent', ''),
+            )
+            
+            # Cancel other active subscriptions
+            UserSubscription.objects.filter(
+                user=user,
+                status='active'
+            ).exclude(id=subscription.id).update(status='cancelled')
+            
+            # Update user's stripe_customer_id
+            if not user.stripe_customer_id:
+                user.stripe_customer_id = session.get('customer')
+                user.save(update_fields=['stripe_customer_id'])
+        else:
+            subscription = existing_subscription
         
         context = {
             'session_id': session_id,
             'message': 'Payment successful! Your subscription is now active.',
             'subscription': subscription,
-            'plan_name': session.get('metadata', {}).get('plan_name', ''),
-            'billing_cycle': session.get('metadata', {}).get('billing_cycle', '')
+            'plan_name': session.metadata.get('plan_name', ''),
+            'billing_cycle': session.metadata.get('billing_cycle', '')
         }
         
+        return render(request, 'payment_success.html', context)
+        
     except Exception as e:
-        print(f"Error retrieving session: {e}")
-        context = {
-            'session_id': session_id,
-            'message': 'Payment successful! Your subscription is now active.',
-            'error': 'Could not retrieve subscription details'
-        }
-    
-    return render(request, 'payment_success.html', context)
+        print(f"Error processing payment success: {e}")
+        return render(request, 'payment_error.html', {
+            'error': 'Failed to process payment confirmation'
+        })
 
 def payment_cancelled(request):
-    """Handle cancelled payment redirect"""
+    """Handle cancelled payment redirect with proper cleanup"""
+    session_id = request.GET.get('session_id')
     context = {
-        'message': 'Payment was cancelled. You can try again anytime.'
+        'message': 'Payment was cancelled. You can try again anytime.',
+        'session_id': session_id
     }
+    
+    if session_id:
+        try:
+            # Retrieve session from Stripe to get details
+            session = stripe.checkout.Session.retrieve(session_id)
+            
+            # Extract metadata
+            user_id = session.get('metadata', {}).get('user_id')
+            plan_id = session.get('metadata', {}).get('plan_id')
+            plan_name = session.get('metadata', {}).get('plan_name', '')
+            billing_cycle = session.get('metadata', {}).get('billing_cycle', '')
+            
+            # Add plan details to context for display
+            context.update({
+                'plan_name': plan_name,
+                'billing_cycle': billing_cycle,
+                'cancelled_plan': True
+            })
+            
+            # Handle any pending subscription records that might exist
+            if user_id and plan_id:
+                handle_cancelled_subscription(user_id, plan_id, session_id)
+            
+            logger.info(f"Payment cancelled for session {session_id}, user_id: {user_id}, plan: {plan_name}")
+            
+        except stripe.error.StripeError as e:
+            logger.error(f"Stripe error retrieving cancelled session {session_id}: {e}")
+            context['error'] = "Could not retrieve session details, but payment was cancelled."
+            
+        except Exception as e:
+            logger.error(f"Error processing cancelled payment for session {session_id}: {e}")
+            context['error'] = "An error occurred while processing the cancellation."
+    
     return render(request, 'payment_cancelled.html', context)
+
+def handle_cancelled_subscription(user_id, plan_id, session_id):
+    """Handle cleanup for cancelled subscription attempts"""
+    try:
+        user = User.objects.get(id=user_id)
+        plan = SubscriptionPlan.objects.get(id=plan_id)
+        
+        # Check if there are any pending subscription records created during checkout
+        # This might happen if user started checkout, record was created, but then cancelled
+        pending_subscriptions = UserSubscription.objects.filter(
+            user=user,
+            plan=plan,
+            payment_status='pending',
+            created_at__gte=timezone.now() - timezone.timedelta(hours=1)  # Recent attempts
+        )
+        
+        if pending_subscriptions.exists():
+            # Mark pending subscriptions as cancelled
+            updated_count = pending_subscriptions.update(
+                status='cancelled',
+                payment_status='failed'
+            )
+            
+            logger.info(f"Marked {updated_count} pending subscriptions as cancelled for user {user.email}")
+            
+        # Optional: Create a record of the cancellation attempt for analytics
+        create_cancellation_record(user, plan, session_id)
+        
+    except User.DoesNotExist:
+        logger.error(f"User not found for cancelled payment: {user_id}")
+    except SubscriptionPlan.DoesNotExist:
+        logger.error(f"Plan not found for cancelled payment: {plan_id}")
+    except Exception as e:
+        logger.error(f"Error handling cancelled subscription cleanup: {e}")
+
+def create_cancellation_record(user, plan, session_id):
+    try:
+        UserSubscription.objects.create(
+            user=user,
+            plan=plan,
+            status='cancelled',
+            payment_status='failed',
+            start_date=timezone.now(),
+            end_date=timezone.now(),
+            transaction_id=f"cancelled_{session_id}",
+        )
+        
+        logger.info(f"Created cancellation record for user {user.email}, plan {plan.name}")
+        
+    except Exception as e:
+        logger.error(f"Error creating cancellation record: {e}")
 
 
 ################################################REFACTORED AI MATCHING AND DONER UPLOAD################################

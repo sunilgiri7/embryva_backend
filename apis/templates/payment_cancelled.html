@@ -18,97 +18,225 @@
         .container {
             background: white;
             padding: 40px;
-            border-radius: 12px;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
             text-align: center;
-            max-width: 500px;
+            max-width: 520px;
             width: 90%;
+            position: relative;
+            overflow: hidden;
+        }
+        .container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #ef4444, #f97316, #eab308);
         }
         .cancel-icon {
-            width: 80px;
-            height: 80px;
-            background: #ef4444;
+            width: 90px;
+            height: 90px;
+            background: linear-gradient(135deg, #ef4444, #dc2626);
             border-radius: 50%;
-            margin: 0 auto 20px;
+            margin: 0 auto 24px;
             display: flex;
             align-items: center;
             justify-content: center;
             animation: shake 0.6s ease-in-out;
+            box-shadow: 0 8px 20px rgba(239, 68, 68, 0.3);
         }
         .cancel-icon svg {
-            width: 40px;
-            height: 40px;
+            width: 45px;
+            height: 45px;
             color: white;
         }
         h1 {
-            color: #1f2937;
-            font-size: 2rem;
-            margin-bottom: 16px;
+            color: #111827;
+            font-size: 2.2rem;
+            margin-bottom: 12px;
+            font-weight: 700;
         }
-        .message {
+        .subtitle {
             color: #6b7280;
             font-size: 1.1rem;
-            margin-bottom: 24px;
+            margin-bottom: 28px;
             line-height: 1.6;
+            font-weight: 400;
         }
-        .info-box {
-            background: #fef3c7;
+        
+        .plan-details {
+            background: linear-gradient(135deg, #fef3c7, #fed7aa);
             border: 1px solid #f59e0b;
+            padding: 20px;
+            border-radius: 12px;
+            margin: 24px 0;
+            color: #92400e;
+        }
+        .plan-details h3 {
+            margin: 0 0 12px 0;
+            color: #92400e;
+            font-size: 1.1rem;
+        }
+        .plan-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 12px;
+        }
+        .plan-info div {
+            text-align: left;
+        }
+        .plan-info strong {
+            display: block;
+            font-size: 0.9rem;
+            margin-bottom: 4px;
+            color: #78350f;
+        }
+        .plan-info span {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+        
+        .error-box {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
             padding: 16px;
             border-radius: 8px;
             margin: 20px 0;
-            color: #92400e;
+            color: #b91c1c;
+            font-size: 0.95rem;
         }
-        .btn {
-            background: #3b82f6;
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-            margin: 10px;
-            transition: background 0.3s ease;
-        }
-        .btn:hover {
-            background: #2563eb;
-        }
-        .btn-primary {
-            background: #10b981;
-        }
-        .btn-primary:hover {
-            background: #059669;
-        }
-        .btn-secondary {
-            background: #6b7280;
-        }
-        .btn-secondary:hover {
-            background: #4b5563;
-        }
+        
         .features {
+            background: #f8fafc;
+            padding: 24px;
+            border-radius: 12px;
+            margin: 24px 0;
             text-align: left;
-            margin: 20px 0;
+        }
+        .features h3 {
+            margin: 0 0 16px 0;
+            color: #1f2937;
+            font-size: 1.1rem;
+            text-align: center;
         }
         .features ul {
             list-style: none;
             padding: 0;
+            margin: 0;
         }
         .features li {
             padding: 8px 0;
             color: #4b5563;
+            font-size: 0.95rem;
+            display: flex;
+            align-items: center;
         }
         .features li:before {
             content: "✓";
             color: #10b981;
             font-weight: bold;
-            margin-right: 8px;
+            margin-right: 12px;
+            width: 20px;
+            height: 20px;
+            background: #dcfce7;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            flex-shrink: 0;
         }
+        
+        .btn-group {
+            margin: 32px 0 24px 0;
+        }
+        .btn {
+            background: #3b82f6;
+            color: white;
+            padding: 14px 28px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            margin: 8px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+        }
+        .btn:hover {
+            background: #2563eb;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #10b981, #059669);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #059669, #047857);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
+        }
+        .btn-secondary {
+            background: #6b7280;
+            box-shadow: 0 4px 12px rgba(107, 114, 128, 0.3);
+        }
+        .btn-secondary:hover {
+            background: #4b5563;
+            box-shadow: 0 6px 20px rgba(107, 114, 128, 0.4);
+        }
+        
+        .help-link {
+            margin-top: 24px;
+            padding-top: 20px;
+            border-top: 1px solid #e5e7eb;
+        }
+        .help-link a {
+            color: #6b7280;
+            text-decoration: none;
+            font-size: 0.95rem;
+            transition: color 0.3s ease;
+        }
+        .help-link a:hover {
+            color: #374151;
+        }
+        
+        .session-id {
+            background: #f3f4f6;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin: 16px 0;
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: #6b7280;
+        }
+        
         @keyframes shake {
             0%, 100% { transform: translateX(0); }
             25% { transform: translateX(-5px); }
             75% { transform: translateX(5px); }
+        }
+        
+        @media (max-width: 640px) {
+            .container {
+                margin: 20px;
+                padding: 30px 25px;
+            }
+            h1 {
+                font-size: 1.8rem;
+            }
+            .btn {
+                padding: 12px 20px;
+                font-size: 0.95rem;
+                margin: 6px;
+            }
+            .plan-info {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -122,50 +250,95 @@
         
         <h1>Payment Cancelled</h1>
         
-        <p class="message">
-            Your payment was cancelled. Don't worry - no charges were made to your account.
+        <p class="subtitle">
+            {{ message }}
         </p>
         
-        <div class="info-box">
-            <strong>What happened?</strong><br>
-            You cancelled the payment process or closed the payment window. 
-            Your subscription has not been activated.
+        {% if session_id %}
+        <div class="session-id">
+            Session: {{ session_id|truncatechars:20 }}...
         </div>
+        {% endif %}
+        
+        {% if error %}
+        <div class="error-box">
+            <strong>Notice:</strong> {{ error }}
+        </div>
+        {% endif %}
+        
+        {% if cancelled_plan %}
+        <div class="plan-details">
+            <h3>🎯 You were about to subscribe to:</h3>
+            <div class="plan-info">
+                <div>
+                    <strong>Plan</strong>
+                    <span>{{ plan_name|default:"Premium Plan" }}</span>
+                </div>
+                <div>
+                    <strong>Billing</strong>
+                    <span>{{ billing_cycle|default:"Monthly" }}</span>
+                </div>
+            </div>
+        </div>
+        {% endif %}
         
         <div class="features">
-            <p><strong>With our subscription, you'll get:</strong></p>
+            <h3>🚀 What you're missing out on:</h3>
             <ul>
                 <li>Full access to all premium features</li>
-                <li>Priority customer support</li>
+                <li>Priority customer support 24/7</li>
                 <li>Monthly updates and new content</li>
+                <li>Advanced analytics and insights</li>
                 <li>Cancel anytime with no hidden fees</li>
             </ul>
         </div>
         
-        <div>
-            <a href="/pricing" class="btn btn-primary">Try Again</a>
-            <a href="/plans" class="btn btn-secondary">View Plans</a>
+        <div class="btn-group">
+            <a href="/pricing" class="btn btn-primary">🔄 Try Again</a>
+            <a href="/plans" class="btn btn-secondary">📋 View All Plans</a>
         </div>
         
-        <div style="margin-top: 20px;">
-            <a href="/contact" style="color: #6b7280; text-decoration: none;">
-                Need help? Contact Support
-            </a>
+        <div class="help-link">
+            <a href="/contact">❓ Need help? Contact our Support Team</a>
         </div>
     </div>
 
     <script>
-        // Optional: Send cancellation event to analytics
-        // gtag('event', 'subscription_cancel', {
-        //     'event_category': 'payment',
-        //     'event_label': 'checkout_cancelled'
-        // });
+        // Track cancellation for analytics
+        if (typeof gtag !== 'undefined') {
+            gtag('event', 'subscription_cancel', {
+                'event_category': 'payment',
+                'event_label': 'checkout_cancelled',
+                'session_id': '{{ session_id|default:"unknown" }}'
+            });
+        }
         
-        // Optional: Show exit intent popup after 30 seconds
+        // Optional: Show exit intent offer after 30 seconds
+        let offerShown = false;
         setTimeout(() => {
-            // You can show a discount offer or survey here
-            console.log('User stayed on cancel page for 30 seconds');
+            if (!offerShown) {
+                console.log('User stayed on cancel page for 30 seconds - could show discount offer');
+                // You could show a modal with a discount offer here
+            }
         }, 30000);
+        
+        // Track time spent on page
+        const startTime = Date.now();
+        window.addEventListener('beforeunload', () => {
+            const timeSpent = Math.round((Date.now() - startTime) / 1000);
+            if (typeof gtag !== 'undefined') {
+                gtag('event', 'time_on_cancel_page', {
+                    'event_category': 'engagement',
+                    'value': timeSpent
+                });
+            }
+        });
+        
+        // Add smooth scroll for mobile
+        if (window.innerWidth <= 640) {
+            document.body.style.paddingTop = '20px';
+            document.body.style.paddingBottom = '20px';
+        }
     </script>
 </body>
 </html>

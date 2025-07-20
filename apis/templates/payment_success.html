@@ -18,116 +18,348 @@
         .container {
             background: white;
             padding: 40px;
-            border-radius: 12px;
-            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            border-radius: 16px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
             text-align: center;
-            max-width: 500px;
+            max-width: 520px;
             width: 90%;
+            position: relative;
+            overflow: hidden;
+        }
+        .container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #10b981, #059669, #047857);
         }
         .success-icon {
-            width: 80px;
-            height: 80px;
-            background: #10b981;
+            width: 90px;
+            height: 90px;
+            background: linear-gradient(135deg, #10b981, #059669);
             border-radius: 50%;
-            margin: 0 auto 20px;
+            margin: 0 auto 24px;
             display: flex;
             align-items: center;
             justify-content: center;
             animation: bounce 0.6s ease-in-out;
+            box-shadow: 0 8px 20px rgba(16, 185, 129, 0.3);
         }
         .success-icon svg {
-            width: 40px;
-            height: 40px;
+            width: 45px;
+            height: 45px;
             color: white;
         }
         h1 {
-            color: #1f2937;
-            font-size: 2rem;
-            margin-bottom: 16px;
+            color: #111827;
+            font-size: 2.2rem;
+            margin-bottom: 12px;
+            font-weight: 700;
         }
-        .message {
+        .subtitle {
             color: #6b7280;
             font-size: 1.1rem;
-            margin-bottom: 24px;
+            margin-bottom: 28px;
             line-height: 1.6;
+            font-weight: 400;
         }
+        
+        .subscription-details {
+            background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+            border: 1px solid #10b981;
+            padding: 24px;
+            border-radius: 12px;
+            margin: 24px 0;
+            text-align: left;
+        }
+        .subscription-details h3 {
+            margin: 0 0 16px 0;
+            color: #065f46;
+            font-size: 1.1rem;
+            text-align: center;
+        }
+        .sub-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        .sub-info div {
+            background: white;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #a7f3d0;
+        }
+        .sub-info strong {
+            display: block;
+            font-size: 0.9rem;
+            margin-bottom: 4px;
+            color: #065f46;
+        }
+        .sub-info span {
+            font-size: 1rem;
+            font-weight: 600;
+            color: #047857;
+        }
+        
+        .next-steps {
+            background: #f8fafc;
+            padding: 24px;
+            border-radius: 12px;
+            margin: 24px 0;
+            text-align: left;
+        }
+        .next-steps h3 {
+            margin: 0 0 16px 0;
+            color: #1f2937;
+            font-size: 1.1rem;
+            text-align: center;
+        }
+        .next-steps ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .next-steps li {
+            padding: 10px 0;
+            color: #4b5563;
+            font-size: 0.95rem;
+            display: flex;
+            align-items: flex-start;
+        }
+        .next-steps li:before {
+            content: counter(step-counter);
+            counter-increment: step-counter;
+            background: #3b82f6;
+            color: white;
+            font-weight: bold;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            margin-right: 12px;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        .next-steps {
+            counter-reset: step-counter;
+        }
+        
         .session-info {
             background: #f3f4f6;
-            padding: 12px;
+            padding: 12px 16px;
             border-radius: 8px;
             margin: 20px 0;
             font-family: monospace;
-            font-size: 0.9rem;
-            color: #4b5563;
+            font-size: 0.85rem;
+            color: #6b7280;
+            border: 1px solid #d1d5db;
+        }
+        
+        .btn-group {
+            margin: 32px 0 24px 0;
         }
         .btn {
             background: #3b82f6;
             color: white;
-            padding: 12px 24px;
+            padding: 14px 28px;
             border: none;
-            border-radius: 8px;
+            border-radius: 10px;
             font-size: 1rem;
+            font-weight: 600;
             cursor: pointer;
             text-decoration: none;
             display: inline-block;
-            margin: 10px;
-            transition: background 0.3s ease;
+            margin: 8px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
         }
         .btn:hover {
             background: #2563eb;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #10b981, #059669);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #059669, #047857);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
         }
         .btn-secondary {
             background: #6b7280;
+            box-shadow: 0 4px 12px rgba(107, 114, 128, 0.3);
         }
         .btn-secondary:hover {
             background: #4b5563;
+            box-shadow: 0 6px 20px rgba(107, 114, 128, 0.4);
         }
+        
         .countdown {
-            color: #9ca3af;
-            font-size: 0.9rem;
-            margin-top: 20px;
+            background: linear-gradient(135deg, #ede9fe, #ddd6fe);
+            color: #5b21b6;
+            font-size: 0.95rem;
+            margin-top: 24px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            border: 1px solid #a78bfa;
         }
+        .countdown-number {
+            font-weight: 700;
+            color: #7c3aed;
+            font-size: 1.1rem;
+        }
+        
+        .success-animation {
+            margin: 20px 0;
+        }
+        .checkmark {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            background: #10b981;
+            border-radius: 50%;
+            margin: 0 8px;
+            position: relative;
+        }
+        .checkmark::after {
+            content: '✓';
+            position: absolute;
+            color: white;
+            font-size: 14px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        
         @keyframes bounce {
             0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
-            40% { transform: translateY(-10px); }
-            60% { transform: translateY(-5px); }
+            40% { transform: translateY(-12px); }
+            60% { transform: translateY(-6px); }
+        }
+        
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        .fade-in {
+            animation: fadeInUp 0.6s ease-out forwards;
+        }
+        
+        @media (max-width: 640px) {
+            .container {
+                margin: 20px;
+                padding: 30px 25px;
+            }
+            h1 {
+                font-size: 1.8rem;
+            }
+            .btn {
+                padding: 12px 20px;
+                font-size: 0.95rem;
+                margin: 6px;
+            }
+            .sub-info {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="container fade-in">
         <div class="success-icon">
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
             </svg>
         </div>
         
-        <h1>Payment Successful!</h1>
+        <h1>🎉 Payment Successful!</h1>
         
-        <p class="message">
+        <p class="subtitle">
             Thank you for your subscription! Your payment has been processed successfully 
-            and your subscription is now active.
+            and your premium access is now active.
         </p>
         
-        {% if session_id %}
-        <div class="session-info">
-            <strong>Session ID:</strong> {{ session_id }}
+        <div class="success-animation">
+            <span class="checkmark"></span>
+            <span>Payment Processed</span>
+            <span class="checkmark"></span>
+            <span>Account Activated</span>
+            <span class="checkmark"></span>
+        </div>
+        
+        {% if subscription %}
+        <div class="subscription-details">
+            <h3>📋 Your Subscription Details</h3>
+            <div class="sub-info">
+                <div>
+                    <strong>Plan</strong>
+                    <span>{{ plan_name|default:subscription.plan.get_name_display }}</span>
+                </div>
+                <div>
+                    <strong>Billing Cycle</strong>
+                    <span>{{ billing_cycle|default:subscription.plan.get_billing_cycle_display }}</span>
+                </div>
+                <div>
+                    <strong>Status</strong>
+                    <span>{{ subscription.status|title }}</span>
+                </div>
+                <div>
+                    <strong>Valid Until</strong>
+                    <span>{{ subscription.end_date|date:"M j, Y" }}</span>
+                </div>
+            </div>
         </div>
         {% endif %}
         
-        <div>
-            <a href="/dashboard" class="btn">Go to Dashboard</a>
-            <a href="/subscription" class="btn btn-secondary">Manage Subscription</a>
+        <div class="next-steps">
+            <h3>🚀 What's Next?</h3>
+            <ul>
+                <li>Access your premium dashboard to explore all features</li>
+                <li>Check your email for subscription confirmation details</li>
+                <li>Manage your subscription settings anytime</li>
+                <li>Contact support if you need any assistance</li>
+            </ul>
+        </div>
+        
+        {% if session_id %}
+        <div class="session-info">
+            <strong>Transaction ID:</strong> {{ session_id }}
+        </div>
+        {% endif %}
+        
+        {% if error %}
+        <div style="background: #fef2f2; border: 1px solid #fecaca; padding: 16px; border-radius: 8px; margin: 20px 0; color: #b91c1c; font-size: 0.9rem;">
+            <strong>Note:</strong> {{ error }}
+        </div>
+        {% endif %}
+        
+        <div class="btn-group">
+            <a href="/dashboard" class="btn btn-primary">🏠 Go to Dashboard</a>
+            <a href="/subscription" class="btn btn-secondary">⚙️ Manage Subscription</a>
         </div>
         
         <div class="countdown">
-            Redirecting to dashboard in <span id="countdown">5</span> seconds...
+            🕒 Redirecting to dashboard in <span class="countdown-number" id="countdown">10</span> seconds...
         </div>
     </div>
 
     <script>
         // Auto-redirect countdown
-        let seconds = 5;
+        let seconds = 10;
         const countdownElement = document.getElementById('countdown');
         
         const timer = setInterval(() => {
@@ -140,12 +372,73 @@
             }
         }, 1000);
         
-        // Optional: Send success event to analytics
-        // gtag('event', 'subscription_purchase', {
-        //     'event_category': 'payment',
-        //     'event_label': '{{ session_id }}',
-        //     'value': 1
-        // });
+        // Track successful payment for analytics
+        if (typeof gtag !== 'undefined') {
+            gtag('event', 'subscription_purchase', {
+                'event_category': 'payment',
+                'event_label': '{{ session_id|default:"unknown" }}',
+                'value': 1,
+                'currency': 'USD'
+            });
+        }
+        
+        // Add confetti effect (optional)
+        function createConfetti() {
+            const colors = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444'];
+            const container = document.body;
+            
+            for (let i = 0; i < 50; i++) {
+                setTimeout(() => {
+                    const confetti = document.createElement('div');
+                    confetti.style.cssText = `
+                        position: fixed;
+                        top: -10px;
+                        left: ${Math.random() * 100}vw;
+                        width: 6px;
+                        height: 6px;
+                        background: ${colors[Math.floor(Math.random() * colors.length)]};
+                        animation: confetti-fall ${2 + Math.random() * 3}s linear forwards;
+                        z-index: 1000;
+                        border-radius: 50%;
+                    `;
+                    container.appendChild(confetti);
+                    
+                    setTimeout(() => confetti.remove(), 5000);
+                }, i * 50);
+            }
+        }
+        
+        // Add confetti CSS animation
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes confetti-fall {
+                to {
+                    transform: translateY(100vh) rotate(360deg);
+                    opacity: 0;
+                }
+            }
+        `;
+        document.head.appendChild(style);
+        
+        // Trigger confetti on page load
+        setTimeout(createConfetti, 500);
+        
+        // Add smooth scroll for mobile
+        if (window.innerWidth <= 640) {
+            document.body.style.paddingTop = '20px';
+            document.body.style.paddingBottom = '20px';
+        }
+        
+        // Prevent accidental navigation away
+        let hasInteracted = false;
+        document.addEventListener('click', () => hasInteracted = true);
+        
+        window.addEventListener('beforeunload', (e) => {
+            if (!hasInteracted && seconds > 5) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
     </script>
 </body>
 </html>

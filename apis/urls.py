@@ -62,7 +62,6 @@ urlpatterns = [
 
     # ======================= STRIPE PAYMENT URLS =======================
     path('payments/create-checkout-session/', views.create_checkout_session, name='create-checkout-session'),
-    path('payments/create-customer-portal-session/', views.create_customer_portal_session, name='create-customer-portal-session'),
     path('payments/stripe-webhook/', views.stripe_webhook, name='stripe-webhook'), # This URL needs to be added to your Stripe dashboard
     path('payment-success/', views.payment_success, name='payment_success'),
     path('payment-cancelled/', views.payment_cancelled, name='payment_cancelled'),
