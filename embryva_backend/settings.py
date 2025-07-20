@@ -164,11 +164,11 @@ CELERY_BEAT_SCHEDULE = {
         }
     },
     'check-expired-subscriptions': {
-        'task': 'myapp.tasks.check_expired_subscriptions',
+        'task': 'apis.tasks.check_expired_subscriptions',
         'schedule': crontab(minute=0, hour=0),  # Run daily at midnight
     },
     'sync-stripe-subscriptions': {
-        'task': 'myapp.tasks.sync_stripe_subscriptions',
+        'task': 'apis.tasks.sync_stripe_subscriptions',
         'schedule': crontab(minute=15, hour=0),  # Run daily at 00:15 AM
     },
 }
