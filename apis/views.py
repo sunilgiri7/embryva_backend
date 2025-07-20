@@ -1736,8 +1736,17 @@ def meeting_update(request, meeting_id):
 
 @swagger_auto_schema(
     method='post',
+    request_body=openapi.Schema(
+        type=openapi.TYPE_OBJECT,
+        properties={
+            'notes': openapi.Schema(
+                type=openapi.TYPE_STRING,
+                description='Notes for status change'
+            ),
+        }
+    ),
     responses={200: "Meeting status updated"},
-    operation_description="Update meeting status (Admin/SubAdmin only)",
+    operation_description="Update meeting status with notes (Admin/SubAdmin only)",
     tags=['Meeting Management']
 )
 @api_view(['POST'])
@@ -1750,16 +1759,36 @@ def meeting_status_update(request, meeting_id, new_status):
         )
     
     meeting = get_object_or_404(Meeting, id=meeting_id)
+    notes = request.data.get('notes', '')
     
     # Validate status
-    valid_statuses = ['scheduled', 'ongoing', 'completed', 'cancelled']
+    valid_statuses = ['pending', 'scheduled', 'upcoming', 'ongoing', 'completed', 'incomplete', 'cancelled', 'rescheduled']
     if new_status not in valid_statuses:
         return Response({
             'success': False,
             'message': f'Invalid status. Valid options: {", ".join(valid_statuses)}'
         }, status=status.HTTP_400_BAD_REQUEST)
     
+    # Store old status for comparison
+    old_status = meeting.status
+    
+    # Update meeting status and tracking fields
     meeting.status = new_status
+    meeting.status_changed_by = request.user
+    meeting.status_changed_at = timezone.now()
+    
+    # Add notes based on status type (assuming you have these fields in your model)
+    if notes:
+        if new_status == 'completed':
+            meeting.completion_notes = notes
+        elif new_status == 'cancelled':
+            meeting.cancellation_notes = notes
+        elif new_status == 'rescheduled':
+            meeting.reschedule_notes = notes
+        else:
+            # For other statuses, use a general status_change_notes field
+            meeting.status_change_notes = notes
+    
     meeting.save()
     
     # Update appointment status based on meeting status
@@ -1769,10 +1798,13 @@ def meeting_status_update(request, meeting_id, new_status):
     elif new_status == 'cancelled':
         meeting.appointment.status = 'pending'  # Reset to pending if meeting cancelled
         meeting.appointment.save()
+    elif new_status == 'rescheduled':
+        meeting.appointment.status = 'pending'  # Reset to pending for rescheduling
+        meeting.appointment.save()
     
     return Response({
         'success': True,
-        'message': f'Meeting status updated to {new_status}',
+        'message': f'Meeting status updated from {old_status} to {new_status}',
         'meeting': MeetingDetailSerializer(meeting).data
     })
 

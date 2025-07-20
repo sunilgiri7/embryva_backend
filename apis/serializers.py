@@ -675,8 +675,9 @@ class MeetingCreateSerializer(serializers.Serializer):
 
 class MeetingDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer for meeting with appointment and participant details"""
-    appointment = serializers.SerializerMethodField()  # Adjust based on your AppointmentDetailSerializer
+    appointment = serializers.SerializerMethodField()
     created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    status_changed_by_name = serializers.CharField(source='status_changed_by.get_full_name', read_only=True)
     participants = serializers.SerializerMethodField()
     is_reminder_due = serializers.ReadOnlyField()
     
@@ -687,6 +688,9 @@ class MeetingDetailSerializer(serializers.ModelSerializer):
             'scheduled_datetime', 'duration_minutes', 'status',
             'creation_email_sent', 'reminder_email_sent',
             'created_at', 'updated_at', 'created_by_name',
+            'confirmation_notes', 'meeting_notes', 'status_change_notes',
+            'completion_notes', 'cancellation_notes', 'reschedule_notes',
+            'status_changed_by_name', 'status_changed_at',
             'appointment', 'participants', 'is_reminder_due'
         ]
     
@@ -694,7 +698,7 @@ class MeetingDetailSerializer(serializers.ModelSerializer):
         return {
             'id': obj.appointment.id,
             'name': obj.appointment.name,
-            # Add other fields as needed
+            'status': obj.appointment.status,
         }
     
     def get_participants(self, obj):

@@ -151,23 +151,27 @@ class Meeting(models.Model):
     )
     
     MEETING_STATUS = (
+        ('pending', 'Pending'),
         ('scheduled', 'Scheduled'),
+        ('upcoming', 'Upcoming'),
         ('ongoing', 'Ongoing'),
         ('completed', 'Completed'),
+        ('incomplete', 'Incomplete'),
         ('cancelled', 'Cancelled'),
+        ('rescheduled', 'Rescheduled'),
     )
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     appointment = models.OneToOneField(
-        'Appointment',  # Use string reference to avoid import issues
+        'Appointment',
         on_delete=models.CASCADE, 
         related_name='meeting'
     )
     
     # Meeting details
     meeting_type = models.CharField(max_length=20, choices=MEETING_TYPES)
-    meeting_link = models.URLField(max_length=500)  # Required
-    meeting_id = models.CharField(max_length=100, blank=True, null=True)  # Made optional
+    meeting_link = models.URLField(max_length=500)
+    meeting_id = models.CharField(max_length=100, blank=True, null=True)
     passcode = models.CharField(max_length=50, blank=True, null=True)
     
     # Scheduling
@@ -175,13 +179,55 @@ class Meeting(models.Model):
     duration_minutes = models.PositiveIntegerField(default=30)
     
     # Status and management
-    status = models.CharField(max_length=20, choices=MEETING_STATUS, default='scheduled')
+    status = models.CharField(max_length=20, choices=MEETING_STATUS, default='pending')
     created_by = models.ForeignKey(
         'User',
         on_delete=models.CASCADE,
         related_name='created_meetings',
         limit_choices_to={'user_type__in': ['admin', 'subadmin']}
     )
+    
+    # Enhanced Notes System
+    confirmation_notes = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="Notes added when appointment is confirmed"
+    )
+    meeting_notes = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="General admin notes about the meeting"
+    )
+    status_change_notes = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="Notes added when status is changed"
+    )
+    completion_notes = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="Notes added when meeting is completed"
+    )
+    cancellation_notes = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="Reason for cancellation"
+    )
+    reschedule_notes = models.TextField(
+        blank=True, 
+        null=True, 
+        help_text="Notes about rescheduling"
+    )
+    
+    # Track who made status changes
+    status_changed_by = models.ForeignKey(
+        'User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='status_changed_meetings'
+    )
+    status_changed_at = models.DateTimeField(null=True, blank=True)
     
     # Email tracking
     creation_email_sent = models.BooleanField(default=False)

@@ -88,6 +88,7 @@ urlpatterns = [
     path('admin/meetings/<uuid:meeting_id>/update/', views.meeting_update, name='meeting_update'),
     path('clinic/donor-stats/', views.clinic_donor_booking_stats, name='clinic_donor_stats'),
     
+    
     # Meeting status management
     path('admin/meetings/<uuid:meeting_id>/status/<str:new_status>/', views.meeting_status_update, name='meeting_status_update'),
     path('admin/meetings/<uuid:meeting_id>/send-reminders/', views.send_meeting_reminders, name='send_meeting_reminders'),
