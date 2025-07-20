@@ -72,6 +72,8 @@ urlpatterns = [
     
     # ====================== APPOINTMENT MANAGEMENT (ADMIN/SUBADMIN) ======================
     path('admin/appointments/', views.appointment_list, name='appointment_list'),
+    path('appointments/my-appointments/', views.parent_appointments_list, name='parent_appointments_list'),
+    path('appointments/stats/', views.parent_appointment_stats, name='parent_appointments_stats'),
     path('admin/appointments/<uuid:appointment_id>/', views.appointment_detail, name='appointment_detail'),
     path('admin/appointments/<uuid:appointment_id>/update/', views.appointment_update, name='appointment_update'),
     path('admin/appointments/<uuid:appointment_id>/delete/', views.appointment_delete, name='appointment_delete'),

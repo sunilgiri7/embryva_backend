@@ -498,6 +498,60 @@ class AppointmentCreateSerializer(serializers.ModelSerializer):
         
         return super().create(validated_data)
 
+class ParentAppointmentListSerializer(serializers.ModelSerializer):
+    reason_display = serializers.CharField(source='get_reason_for_consultation_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    
+    # Meeting status
+    has_meeting = serializers.SerializerMethodField()
+    meeting_status = serializers.SerializerMethodField()
+    
+    # Formatted dates
+    booking_date = serializers.SerializerMethodField()
+    preferred_datetime = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Appointment
+        fields = [
+            'id',
+            'name',
+            'email',
+            'phone_number',
+            'reason_for_consultation',
+            'reason_display',
+            'status',
+            'status_display',
+            'preferred_date',
+            'preferred_time',
+            'preferred_datetime',
+            'additional_notes',
+            'created_at',
+            'booking_date',
+            'has_meeting',
+            'meeting_status'
+        ]
+    
+    def get_has_meeting(self, obj):
+        """Check if appointment has an associated meeting"""
+        return hasattr(obj, 'meeting')
+    
+    def get_meeting_status(self, obj):
+        """Get meeting status if meeting exists"""
+        if hasattr(obj, 'meeting'):
+            return obj.meeting.status
+        return None
+    
+    def get_booking_date(self, obj):
+        """Format booking date for display"""
+        return obj.created_at.strftime('%Y-%m-%d %H:%M:%S')
+    
+    def get_preferred_datetime(self, obj):
+        """Combine preferred date and time for display"""
+        if obj.preferred_date and obj.preferred_time:
+            return f"{obj.preferred_date} {obj.preferred_time}"
+        elif obj.preferred_date:
+            return str(obj.preferred_date)
+        return None
 
 class AppointmentDetailSerializer(serializers.ModelSerializer):
     """Detailed serializer for appointment with all relationships"""

@@ -1365,6 +1365,73 @@ def appointment_list(request):
     
     return paginator.get_paginated_response(serializer.data)
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def parent_appointments_list(request):
+    # Check if user is a parent
+    if not request.user.is_parent:
+        return Response({
+            'success': False,
+            'message': 'Access denied. Only parents can view their appointments.'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    # Get appointments for the logged-in parent
+    appointments = Appointment.objects.filter(
+        Q(parent=request.user) | Q(email=request.user.email)
+    ).select_related('clinic', 'donor').order_by('-created_at')
+    
+    # Apply filters if provided
+    status_filter = request.GET.get('status')
+    if status_filter:
+        appointments = appointments.filter(status=status_filter)
+    
+    reason_filter = request.GET.get('reason')
+    if reason_filter:
+        appointments = appointments.filter(reason_for_consultation=reason_filter)
+    
+    # Serialize the appointments
+    serializer = ParentAppointmentListSerializer(appointments, many=True)
+    
+    return Response({
+        'success': True,
+        'message': 'Appointments retrieved successfully',
+        'total_appointments': appointments.count(),
+        'appointments': serializer.data
+    }, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def parent_appointment_stats(request):
+    if not request.user.is_parent:
+        return Response({
+            'success': False,
+            'message': 'Access denied. Only parents can view their appointment statistics.'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    appointments = Appointment.objects.filter(
+        Q(parent=request.user) | Q(email=request.user.email)
+    )
+    
+    stats = {
+        'total_appointments': appointments.count(),
+        'pending_appointments': appointments.filter(status='pending').count(),
+        'confirmed_appointments': appointments.filter(status='confirmed').count(),
+        'completed_appointments': appointments.filter(status='completed').count(),
+        'cancelled_appointments': appointments.filter(status='cancelled').count(),
+        'consultation_types': {
+            'sperm': appointments.filter(reason_for_consultation='sperm').count(),
+            'egg': appointments.filter(reason_for_consultation='egg').count(),
+            'surrogate': appointments.filter(reason_for_consultation='surrogate').count(),
+        }
+    }
+    
+    return Response({
+        'success': True,
+        'message': 'Appointment statistics retrieved successfully',
+        'stats': stats
+    }, status=status.HTTP_200_OK)
+
+
 @swagger_auto_schema(
     method='get',
     responses={200: AppointmentDetailSerializer()},
