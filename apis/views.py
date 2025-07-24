@@ -1642,13 +1642,13 @@ def create_instant_meeting(request):
     tags=['Meeting Management']
 )
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def meeting_list(request):
-    if not (request.user.is_admin or request.user.is_subadmin or request.user.is_clinic):
-        return Response(
-            {"detail": "Only admins or sub-admins can view meetings."},
-            status=status.HTTP_403_FORBIDDEN,
-        )
+    # if not (request.user.is_admin or request.user.is_subadmin or request.user.is_clinic):
+    #     return Response(
+    #         {"detail": "Only admins or sub-admins or clinic can view meetings."},
+    #         status=status.HTTP_403_FORBIDDEN,
+    #     )
     
     queryset = Meeting.objects.select_related(
         'appointment', 'appointment__clinic', 'appointment__parent', 'created_by'
