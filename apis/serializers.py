@@ -605,6 +605,47 @@ class AppointmentDetailSerializer(serializers.ModelSerializer):
             }
         return None
 
+class ClinicAppointmentDetailSerializer(serializers.ModelSerializer):
+    """Detailed serializer for clinic appointments with limited parent details"""
+    
+    donor_name = serializers.CharField(source='donor.full_name', read_only=True)
+    donor_id = serializers.CharField(source='donor.donor_id', read_only=True)
+    donor_type = serializers.CharField(source='donor.donor_type', read_only=True)
+    
+    # Limited parent details - only essential fields
+    parent_name = serializers.CharField(source='parent.get_full_name', read_only=True)
+    parent_contact = serializers.CharField(source='parent.phone_number', read_only=True)
+    
+    reviewed_by_name = serializers.CharField(source='reviewed_by.get_full_name', read_only=True)
+    
+    has_meeting = serializers.SerializerMethodField()
+    meeting_details = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Appointment
+        fields = [
+            'id', 'name', 'email', 'phone_number', 'reason_for_consultation',
+            'additional_notes', 'status', 'preferred_date', 'preferred_time',
+            'created_at', 'updated_at', 'admin_notes',
+            'donor_name', 'donor_id', 'donor_type',
+            'parent_name', 'parent_contact', 'reviewed_by_name',
+            'has_meeting', 'meeting_details'
+        ]
+    
+    def get_has_meeting(self, obj):
+        return hasattr(obj, 'meeting')
+    
+    def get_meeting_details(self, obj):
+        if hasattr(obj, 'meeting'):
+            return {
+                'id': obj.meeting.id,
+                'meeting_type': obj.meeting.meeting_type,
+                'scheduled_datetime': obj.meeting.scheduled_datetime,
+                'status': obj.meeting.status,
+                'meeting_link': obj.meeting.meeting_link,
+                'duration_minutes': obj.meeting.duration_minutes
+            }
+        return None
 
 class AppointmentUpdateSerializer(serializers.ModelSerializer):
     class Meta:

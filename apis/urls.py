@@ -119,5 +119,8 @@ urlpatterns = [
     
     # path('donors/trigger-embedding/', views.trigger_donor_embedding_on_create, name='trigger_donor_embedding'),
     path('contact-us/', views.contact_us_view, name='contact-us'),
-    path('', include(router.urls))
+    path('', include(router.urls)),
+
+    path('clinic/appointments/', views.clinic_appointment_list, name='clinic-appointment-list'),
+    path('clinic/meetings/', views.clinic_meeting_list, name='clinic-meeting-list'),
 ]

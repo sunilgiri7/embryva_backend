@@ -1365,6 +1365,116 @@ def appointment_list(request):
     
     return paginator.get_paginated_response(serializer.data)
 
+@swagger_auto_schema(
+    method='get',
+    manual_parameters=[
+        openapi.Parameter('page', openapi.IN_QUERY, description="Page number", type=openapi.TYPE_INTEGER),
+        openapi.Parameter('page_size', openapi.IN_QUERY, description="Results per page", type=openapi.TYPE_INTEGER),
+        openapi.Parameter('search', openapi.IN_QUERY, description="Search by name, email, or reason", type=openapi.TYPE_STRING),
+        openapi.Parameter('status', openapi.IN_QUERY, description="Filter by status", type=openapi.TYPE_STRING),
+        openapi.Parameter('has_meeting', openapi.IN_QUERY, description="Filter by meeting status (true/false)", type=openapi.TYPE_BOOLEAN),
+        openapi.Parameter('reason', openapi.IN_QUERY, description="Filter by consultation reason", type=openapi.TYPE_STRING),
+    ],
+    responses={200: ClinicAppointmentDetailSerializer(many=True)},
+    operation_description="Get clinic's appointments with filters (Clinic only)",
+    tags=['Clinic Appointment Management']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def clinic_appointment_list(request):
+    if not request.user.is_clinic:
+        return Response(
+            {"detail": "Only clinics can view their appointments."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    # Filter appointments for the current clinic only
+    queryset = Appointment.objects.select_related(
+        'parent', 'reviewed_by', 'donor'
+    ).prefetch_related('meeting').filter(
+        clinic=request.user
+    ).order_by('-created_at')
+    
+    # Search functionality
+    search = request.query_params.get('search', None)
+    if search:
+        queryset = queryset.filter(
+            Q(name__icontains=search) | 
+            Q(email__icontains=search) | 
+            Q(reason_for_consultation__icontains=search) |
+            Q(phone_number__icontains=search)
+        )
+    
+    # Status filter
+    status_filter = request.query_params.get('status', None)
+    if status_filter:
+        queryset = queryset.filter(status=status_filter)
+    
+    # Consultation reason filter
+    reason = request.query_params.get('reason', None)
+    if reason:
+        queryset = queryset.filter(reason_for_consultation=reason)
+    
+    # Meeting filter
+    has_meeting = request.query_params.get('has_meeting', None)
+    if has_meeting is not None:
+        if has_meeting.lower() == 'true':
+            queryset = queryset.filter(meeting__isnull=False)
+        elif has_meeting.lower() == 'false':
+            queryset = queryset.filter(meeting__isnull=True)
+    
+    paginator = StandardResultsSetPagination()
+    paginated_queryset = paginator.paginate_queryset(queryset, request)
+    serializer = ClinicAppointmentDetailSerializer(paginated_queryset, many=True)
+    
+    return paginator.get_paginated_response(serializer.data)
+
+
+# Clinic-specific Meetings List API
+@swagger_auto_schema(
+    method='get',
+    manual_parameters=[
+        openapi.Parameter('page', openapi.IN_QUERY, description="Page number", type=openapi.TYPE_INTEGER),
+        openapi.Parameter('page_size', openapi.IN_QUERY, description="Results per page", type=openapi.TYPE_INTEGER),
+        openapi.Parameter('status', openapi.IN_QUERY, description="Filter by meeting status", type=openapi.TYPE_STRING),
+        openapi.Parameter('meeting_type', openapi.IN_QUERY, description="Filter by meeting type", type=openapi.TYPE_STRING),
+    ],
+    responses={200: MeetingDetailSerializer(many=True)},
+    operation_description="Get clinic's meetings with filters (Clinic only)",
+    tags=['Clinic Meeting Management']
+)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def clinic_meeting_list(request):
+    if not request.user.is_clinic:
+        return Response(
+            {"detail": "Only clinics can view their meetings."},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    
+    # Filter meetings for appointments that belong to the current clinic
+    queryset = Meeting.objects.select_related(
+        'appointment', 'appointment__clinic', 'appointment__parent', 'created_by'
+    ).prefetch_related('participants').filter(
+        appointment__clinic=request.user
+    ).order_by('-created_at')
+    
+    # Status filter
+    status_filter = request.query_params.get('status', None)
+    if status_filter:
+        queryset = queryset.filter(status=status_filter)
+    
+    # Meeting type filter
+    meeting_type = request.query_params.get('meeting_type', None)
+    if meeting_type:
+        queryset = queryset.filter(meeting_type=meeting_type)
+    
+    paginator = StandardResultsSetPagination()
+    paginated_queryset = paginator.paginate_queryset(queryset, request)
+    serializer = MeetingDetailSerializer(paginated_queryset, many=True)
+    
+    return paginator.get_paginated_response(serializer.data)
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def parent_appointments_list(request):
