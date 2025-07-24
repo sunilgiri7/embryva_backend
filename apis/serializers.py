@@ -505,6 +505,7 @@ class ParentAppointmentListSerializer(serializers.ModelSerializer):
     # Meeting status
     has_meeting = serializers.SerializerMethodField()
     meeting_status = serializers.SerializerMethodField()
+    meeting_link = serializers.SerializerMethodField()
     
     # Formatted dates
     booking_date = serializers.SerializerMethodField()
@@ -528,7 +529,8 @@ class ParentAppointmentListSerializer(serializers.ModelSerializer):
             'created_at',
             'booking_date',
             'has_meeting',
-            'meeting_status'
+            'meeting_status',
+            'meeting_link'
         ]
     
     def get_has_meeting(self, obj):
@@ -539,6 +541,11 @@ class ParentAppointmentListSerializer(serializers.ModelSerializer):
         """Get meeting status if meeting exists"""
         if hasattr(obj, 'meeting'):
             return obj.meeting.status
+        return None
+
+    def get_meeting_link(self, obj):
+        if hasattr(obj, 'meeting'):
+            return obj.meeting.meeting_link
         return None
     
     def get_booking_date(self, obj):
