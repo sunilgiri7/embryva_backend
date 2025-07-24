@@ -2547,6 +2547,27 @@ class UserSubscriptionViewSet(viewsets.ModelViewSet):
             }
         })
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def parent_transaction_list(request):
+    """Returns the transaction list for the logged-in parent user"""
+
+    # Check if the user is a parent
+    user = request.user
+    if not user.user_type == 'parent':
+        return Response({
+            'error': 'Access denied. Only parent users can view their transactions.'
+        }, status=status.HTTP_403_FORBIDDEN)
+
+    # Filter transactions for this parent
+    subscriptions = UserSubscription.objects.filter(user=user).select_related('plan')
+    serializer = UserSubscriptionSerializer(subscriptions, many=True)
+
+    return Response({
+        'message': 'Transaction list retrieved successfully.',
+        'data': serializer.data
+    }, status=status.HTTP_200_OK)
+
 # ====================== DONOR IMPORT/EXPORT ======================
 
 @swagger_auto_schema(
