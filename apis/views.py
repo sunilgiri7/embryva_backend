@@ -1644,7 +1644,7 @@ def create_instant_meeting(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def meeting_list(request):
-    if not (request.user.is_admin or request.user.is_subadmin):
+    if not (request.user.is_admin or request.user.is_subadmin or request.user.is_clinic):
         return Response(
             {"detail": "Only admins or sub-admins can view meetings."},
             status=status.HTTP_403_FORBIDDEN,
