@@ -59,7 +59,7 @@ urlpatterns = [
     path('admin/subscription/subscriptions/<uuid:pk>/cancel/', views.UserSubscriptionViewSet.as_view({'post': 'cancel'}), name='user-subscriptions-cancel'),
     path('admin/subscription/subscriptions/<uuid:pk>/renew/', views.UserSubscriptionViewSet.as_view({'post': 'renew'}), name='user-subscriptions-renew'),
     path('admin/subscription/stats/', views.UserSubscriptionViewSet.as_view({'get': 'subscription_stats'}), name='subscription-stats'),
-    path('api/parent/transactions/', views.parent_transaction_list, name='parent-transaction-list'),
+    path('parent/transactions/', views.parent_transaction_list, name='parent-transaction-list'),
 
     # ======================= STRIPE PAYMENT URLS =======================
     path('payments/create-checkout-session/', views.create_checkout_session, name='create-checkout-session'),
