@@ -2961,6 +2961,23 @@ def create_fertility_profile(request):
             status=status.HTTP_403_FORBIDDEN,
         )
     
+    # Check subscription status
+    subscription_status = False
+    subscription_message = ""
+    try:
+        user_subscription = UserSubscription.objects.get(
+            user=request.user,
+            status='active'
+        )
+        # Double check if subscription is actually active (not expired)
+        if user_subscription.is_active:
+            subscription_status = True
+        else:
+            user_subscription.check_expiry()  # This will update status if expired
+            subscription_message = "Your subscription has expired. Please renew to access premium features."
+    except UserSubscription.DoesNotExist:
+        subscription_message = "You don't have an active subscription. Subscribe to unlock premium features."
+    
     donor_type = request.data.get('donor_type_preference')
     
     # Check if profile already exists for this parent and donor type
@@ -2986,18 +3003,40 @@ def create_fertility_profile(request):
     
     if serializer.is_valid():
         profile = serializer.save()
-        return Response({
+        
+        # Build response
+        response_data = {
             'success': True,
             'message': f'Fertility profile {action} successfully',
             'profile_id': str(profile.id),
-            'action': action
-        }, status=status.HTTP_201_CREATED if action == 'created' else status.HTTP_200_OK)
+            'action': action,
+            'subscription': subscription_status
+        }
+        
+        # Add subscription message and URL if not subscribed
+        if not subscription_status:
+            response_data['subscription_message'] = subscription_message
+            response_data['subscription_url'] = 'https://bittrans.io/subscription'
+        
+        return Response(
+            response_data,
+            status=status.HTTP_201_CREATED if action == 'created' else status.HTTP_200_OK
+        )
     
-    return Response({
+    # Build error response with subscription info
+    error_response = {
         'success': False,
         'message': 'Please check the form data',
-        'errors': serializer.errors
-    }, status=status.HTTP_400_BAD_REQUEST)
+        'errors': serializer.errors,
+        'subscription': subscription_status
+    }
+    
+    # Add subscription message and URL if not subscribed
+    if not subscription_status:
+        error_response['subscription_message'] = subscription_message
+        error_response['subscription_url'] = 'https://bittrans.io/subscription'
+    
+    return Response(error_response, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['PATCH', 'PUT'])
 @permission_classes([IsAuthenticated])
@@ -3175,7 +3214,7 @@ def create_checkout_session(request):
         
         if existing_subscription:
             return Response({
-                "error": "You already have an active subscription. Please cancel it first."
+                "error": "You already have an active subscription. Please contact to admin"
             }, status=status.HTTP_400_BAD_REQUEST)
 
         # Get or create a Stripe Customer for the user
@@ -3712,6 +3751,24 @@ def import_donors_view(request):
 def find_matching_donors_view(request):
     if not request.user.is_parent:
         return Response({"detail": "Only parents can search for matches."}, status=status.HTTP_403_FORBIDDEN)
+
+    # Check if user has an active subscription
+    try:
+        user_subscription = UserSubscription.objects.get(
+            user=request.user,
+            status='active'
+        )
+        # Double check if subscription is actually active (not expired)
+        if not user_subscription.is_active:
+            user_subscription.check_expiry()  # This will update status if expired
+            raise UserSubscription.DoesNotExist
+            
+    except UserSubscription.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'You need an active subscription to access donor matching services. Please subscribe to continue.',
+            'subscription_url': 'https://bittrans.io/subscription'
+        }, status=status.HTTP_402_PAYMENT_REQUIRED)
 
     profile_id = request.data.get('profile_id')
     try:
